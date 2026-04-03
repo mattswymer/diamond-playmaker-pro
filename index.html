@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Diamond Playmaker Pro | Architect V4.1</title>
+    <title>Diamond Playmaker Pro | Architect V4.4</title>
     <style>
         :root {
             --bg: #0f172a; --surface: #1e293b; --surface-hover: #334155; --border: #475569;
@@ -67,16 +67,24 @@
         .radial-btn:hover::after { opacity: 1; transform: translateX(-50%) scale(1); }
         .radial-btn[data-action="delete"]:hover { background: var(--danger); border-color: var(--danger); }
         
-        .radial-btn:nth-child(1) { transform: translateY(-56px); } /* Run */
-        .radial-btn:nth-child(2) { transform: translate(48px, -28px); } /* Throw */
-        .radial-btn:nth-child(3) { transform: translate(48px, 28px); } /* Hit */
-        .radial-btn:nth-child(4) { transform: translateY(56px); } /* Delete */
+        .radial-btn:nth-child(1) { transform: translateY(-56px); }
+        .radial-btn:nth-child(2) { transform: translate(48px, -28px); }
+        .radial-btn:nth-child(3) { transform: translate(48px, 28px); }
+        .radial-btn:nth-child(4) { transform: translateY(56px); }
 
         .radial-btn:nth-child(1)::after, .radial-btn:nth-child(2)::after { bottom: calc(100% + 10px); }
         .radial-btn:nth-child(3)::after, .radial-btn:nth-child(4)::after { top: calc(100% + 10px); }
 
         .viewport-controls { position: absolute; bottom: 1rem; right: 1rem; display: flex; gap: 0.5rem; z-index: 50; }
         .viewport-controls .btn { padding: 0.4rem 0.8rem; background: rgba(30, 41, 59, 0.8); backdrop-filter: blur(4px); }
+
+        /* TOAST NOTIFICATION */
+        .toast {
+            position: absolute; bottom: 4rem; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: var(--text); color: var(--bg); padding: 0.6rem 1.2rem; border-radius: 20px;
+            font-size: 0.85rem; font-weight: 600; opacity: 0; pointer-events: none; transition: 0.3s; z-index: 1000;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
     </style>
 </head>
 <body>
@@ -87,7 +95,7 @@
             <button class="btn" id="btn-undo" disabled>↶ Undo</button>
             <button class="btn" id="btn-redo" disabled>↷ Redo</button>
             <div style="width: 1px; background: var(--border); margin: 0 0.5rem;"></div>
-            <button class="btn btn-warning" id="btn-reset">🔄 Reset</button>
+            <button class="btn btn-warning" id="btn-reset">🔄 Reset All</button>
             <button class="btn btn-primary" id="btn-play">▶ Play</button>
         </div>
     </header>
@@ -127,6 +135,7 @@
                 <button class="btn" id="btn-zoom-reset">Reset View</button>
                 <button class="btn" id="btn-zoom-in">+</button>
             </div>
+            <div id="toast" class="toast"></div>
         </main>
 
         <aside class="right">
@@ -148,8 +157,8 @@
 
 <script>
 /**
- * ARCHITECTURE V4.1
- * Includes Native Physics Multi-Touch Camera Anchoring & Precise Placement
+ * ARCHITECTURE V4.4: Production Readiness
+ * Implements: Min/Max Zoom Clamping, Path2D Caching, Unified Hit Detection, Screen-Space Drag Thresholds, Pinch Smoothing
  */
 
 // ============================================================================
@@ -157,6 +166,10 @@
 // ============================================================================
 class StateStore {
     constructor() {
+        this.reset();
+    }
+
+    reset() {
         this.frames = [{ id: 1, name: 'Frame 1', players: [], lines: [] }];
         this.currentIdx = 0;
         this.history = [];
@@ -195,34 +208,62 @@ class StateStore {
 }
 
 // ============================================================================
-// 2. VIEWPORT MANAGER
+// 2. VIEWPORT MANAGER (Strict Clamping)
 // ============================================================================
 class Viewport {
-    constructor(canvas) {
+    constructor(canvas, app) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
-        this.x = 0; this.y = 0; this.scale = 1;
+        this.app = app;
+        this.x = 0; this.y = 0; 
+        this._scale = 1;
         this.dpr = window.devicePixelRatio || 1;
+        this.width = 0; this.height = 0;
         
-        this.resize();
-        window.addEventListener('resize', () => this.resize());
+        this.resizeObserver = new ResizeObserver(entries => {
+            for (let entry of entries) {
+                if(entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+                    this.resize(entry.contentRect.width, entry.contentRect.height);
+                    if(this.width === entry.contentRect.width && !this.initialized) {
+                        this.centerOn(400, 500);
+                        this.initialized = true;
+                    }
+                    if(this.app) this.app.scheduleRender();
+                }
+            }
+        });
+        this.resizeObserver.observe(this.canvas.parentElement);
     }
 
-    resize() {
-        const rect = this.canvas.parentElement.getBoundingClientRect();
-        this.width = rect.width;
-        this.height = rect.height;
+    // Min/Max Zoom enforced globally
+    get scale() { return this._scale; }
+    set scale(val) { this._scale = Math.max(0.4, Math.min(val, 4.0)); }
+
+    resize(w, h) {
+        this.width = w;
+        this.height = h;
         this.canvas.width = this.width * this.dpr;
         this.canvas.height = this.height * this.dpr;
         this.canvas.style.width = `${this.width}px`;
         this.canvas.style.height = `${this.height}px`;
-        this.centerOn(400, 400); 
     }
 
     clamp() {
-        const boundsLimit = 800 * this.scale;
-        this.x = Math.max(this.width - boundsLimit, Math.min(boundsLimit, this.x));
-        this.y = Math.max(this.height - boundsLimit, Math.min(boundsLimit, this.y));
+        const fieldCenterX = 400 * this.scale + this.x;
+        const fieldCenterY = 400 * this.scale + this.y;
+        const marginX = this.width * 0.4;
+        const marginY = this.height * 0.4;
+        
+        const minCx = -marginX;
+        const maxCx = this.width + marginX;
+        const minCy = -marginY;
+        const maxCy = this.height + marginY;
+        
+        let targetCx = Math.max(minCx, Math.min(maxCx, fieldCenterX));
+        let targetCy = Math.max(minCy, Math.min(maxCy, fieldCenterY));
+        
+        this.x = targetCx - 400 * this.scale;
+        this.y = targetCy - 400 * this.scale;
     }
 
     centerOn(worldX, worldY) {
@@ -249,13 +290,14 @@ class Viewport {
 }
 
 // ============================================================================
-// 3. RENDERER
+// 3. RENDERER (Path2D Caching applied)
 // ============================================================================
 class Renderer {
     constructor(ctx, viewport, config) {
         this.ctx = ctx;
         this.vp = viewport;
         this.cfg = config;
+        this.pathCache = new Map(); // Memory safe caching
         
         const cx = 400, cy = 720, s = 2.8;
         this.GEO = {
@@ -265,6 +307,14 @@ class Renderer {
             B3: {x: cx - (60 * s * Math.cos(Math.PI/4)), y: cy - (60 * s * Math.sin(Math.PI/4))}
         };
         this.COLORS = { foul: '#0f172a', fair: '#16a34a', dirt: '#b45309', run: '#f59e0b', throw: '#ffffff', hit: '#f97316' };
+    }
+
+    clearCache() {
+        this.pathCache.clear();
+    }
+
+    getVisualRadius(player) {
+        return player.type === 'ball' ? this.cfg.radius * 0.7 : this.cfg.radius;
     }
 
     draw(state, inputIx, progress = null, animFrame = null) {
@@ -346,11 +396,19 @@ class Renderer {
     }
 
     generateLinePath(l, progress = 1, inputIx = null) {
+        const isDrawing = (l === inputIx?.drawingLine);
+        const isAnim = progress !== null && progress < 1;
+
+        // Path2D Caching ensures complex Beziers/Squiggles aren't rebuilt 60fps unless necessary
+        if (!isDrawing && !isAnim && this.pathCache.has(l.id)) {
+            return this.pathCache.get(l.id);
+        }
+
         const p2d = new Path2D();
         p2d.moveTo(l.start.x, l.start.y);
         
         const actEnd = { x: l.start.x + (l.end.x - l.start.x) * progress, y: l.start.y + (l.end.y - l.start.y) * progress };
-        if(l === inputIx?.drawingLine) { actEnd.x = inputIx.mouseX; actEnd.y = inputIx.mouseY; }
+        if(isDrawing) { actEnd.x = inputIx.mouseX; actEnd.y = inputIx.mouseY; }
 
         if (l.type === 'run') {
             const dist = Math.hypot(actEnd.x - l.start.x, actEnd.y - l.start.y);
@@ -359,12 +417,17 @@ class Renderer {
         } else if (l.type === 'throw') {
             p2d.lineTo(actEnd.x, actEnd.y);
         } else if (l.type === 'hit') {
-            const cp = this.getArcCP(l.start, l === inputIx?.drawingLine ? actEnd : l.end);
+            const cp = this.getArcCP(l.start, isDrawing ? actEnd : l.end);
             for(let t=0; t<=progress; t+=0.02) { 
-                const pt = this.getBezier(t, l.start, cp, l === inputIx?.drawingLine ? actEnd : l.end); 
+                const pt = this.getBezier(t, l.start, cp, isDrawing ? actEnd : l.end); 
                 p2d.lineTo(pt.x, pt.y); 
             }
         }
+        
+        if (!isDrawing && !isAnim) {
+            this.pathCache.set(l.id, p2d);
+        }
+
         return p2d;
     }
 
@@ -381,14 +444,18 @@ class Renderer {
 
     drawToken(screenX, screenY, p, isActive) {
         const c = this.ctx;
-        c.beginPath(); c.arc(screenX, screenY, this.cfg.radius, 0, Math.PI*2);
+        const radius = this.getVisualRadius(p);
+        
+        c.beginPath(); c.arc(screenX, screenY, radius, 0, Math.PI*2);
         c.fillStyle = p.type === 'ball' ? '#fff' : (p.type === 'off' ? '#ef4444' : '#3b82f6'); 
         c.fill(); c.strokeStyle = p.type === 'ball' ? '#ef4444' : '#000'; c.lineWidth = 2; c.stroke();
-        c.fillStyle = p.type === 'ball' ? '#000' : '#fff'; c.font = 'bold 12px sans-serif';
+        
+        c.fillStyle = p.type === 'ball' ? '#000' : '#fff'; 
+        c.font = p.type === 'ball' ? '12px sans-serif' : 'bold 12px sans-serif'; 
         c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(p.label, screenX, screenY);
 
         if(isActive) {
-            c.beginPath(); c.arc(screenX, screenY, this.cfg.radius+4, 0, Math.PI*2);
+            c.beginPath(); c.arc(screenX, screenY, radius+4, 0, Math.PI*2);
             c.fillStyle = 'rgba(255,255,255,0.2)'; c.fill();
         }
     }
@@ -405,7 +472,7 @@ class Renderer {
 }
 
 // ============================================================================
-// 4. INPUT HANDLER 
+// 4. INPUT HANDLER (Unified Hitboxes, Screen-Space Drag Thresholds)
 // ============================================================================
 class InputHandler {
     constructor(canvas, viewport, state, renderer, app) {
@@ -415,9 +482,13 @@ class InputHandler {
         this.renderer = renderer;
         this.app = app;
 
-        this.ix = { activeEntity: null, drawingLine: null, draggingPlayer: null, mouseX: 0, mouseY: 0 };
+        this.ix = { activeEntity: null, drawingLine: null, draggingPlayer: null, mouseX: 0, mouseY: 0, startScreenX: 0, startScreenY: 0 };
         this.keys = {};
         this.pointers = new Map();
+        
+        this.pinchStartDist = null;
+        this.pinchStartScale = null;
+        this.panStartMid = null;
 
         this._boundDown = this.onPointerDown.bind(this);
         this._boundMove = this.onPointerMove.bind(this);
@@ -441,22 +512,14 @@ class InputHandler {
         const worldPos = this.vp.screenToWorld(mouseX, mouseY);
         
         this.vp.scale *= zoomDelta;
-        this.vp.scale = Math.max(0.5, Math.min(this.vp.scale, 3)); 
         this.vp.x = mouseX - (worldPos.x * this.vp.scale);
         this.vp.y = mouseY - (worldPos.y * this.vp.scale);
         this.vp.clamp();
         this.app.scheduleRender();
     }
 
-    attachGlobalMove() {
-        document.addEventListener('pointermove', this._boundMove);
-    }
-
-    detachGlobalMove() {
-        if(this.pointers.size === 0 && !this.ix.drawingLine) {
-            document.removeEventListener('pointermove', this._boundMove);
-        }
-    }
+    attachGlobalMove() { document.addEventListener('pointermove', this._boundMove); }
+    detachGlobalMove() { if(this.pointers.size === 0 && !this.ix.drawingLine) document.removeEventListener('pointermove', this._boundMove); }
 
     getMidpoint(p1, p2) { return { x: (p1.x + p2.x)/2, y: (p1.y + p2.y)/2 }; }
     getDistance(p1, p2) { return Math.hypot(p2.x - p1.x, p2.y - p1.y); }
@@ -480,6 +543,10 @@ class InputHandler {
         const screenX = e.clientX - rect.left;
         const screenY = e.clientY - rect.top;
         const worldPos = this.vp.screenToWorld(screenX, screenY);
+        
+        // Track for Tap vs Drag threshold
+        this.ix.startScreenX = screenX;
+        this.ix.startScreenY = screenY;
 
         if (this.keys['Space'] || e.button === 1) {
             this.pointers.set('pan', { x: screenX, y: screenY, vpX: this.vp.x, vpY: this.vp.y });
@@ -496,14 +563,15 @@ class InputHandler {
             return;
         }
 
+        // Hit Detection matches exactly what the eye sees (Visual Screen Size + 8px padding)
         const hitPlayer = [...this.state.f.players].reverse().find(p => {
             const pScreen = this.vp.worldToScreen(p.x, p.y);
-            return Math.hypot(screenX - pScreen.x, screenY - pScreen.y) <= 24;
+            const visualRadius = this.renderer.getVisualRadius(p);
+            return Math.hypot(screenX - pScreen.x, screenY - pScreen.y) <= (visualRadius + 8);
         });
 
         if (hitPlayer) {
             this.ix.draggingPlayer = hitPlayer;
-            this.ix.dragStart = {x: hitPlayer.x, y: hitPlayer.y};
             this.app.closeRadial();
             return;
         }
@@ -530,28 +598,25 @@ class InputHandler {
 
         const rect = this.canvas.getBoundingClientRect();
         
-        // Exact Affine Transform for Multi-Touch Pan/Zoom Anchoring
+        // Touch Smoothing via targetScale Interpolation
         if (this.pointers.size === 2) {
             const pts = Array.from(this.pointers.values());
             const currentDist = this.getDistance(pts[0], pts[1]);
             const currentMid = this.getMidpoint(pts[0], pts[1]);
             
-            // 1. Calculate precise new scale
-            const targetScale = this.pinchStartScale * (currentDist / this.pinchStartDist);
-            const clampedScale = Math.max(0.5, Math.min(targetScale, 3));
+            const rawTargetScale = this.pinchStartScale * (currentDist / this.pinchStartDist);
+            const smoothedScale = this.vp.scale + (rawTargetScale - this.vp.scale) * 0.4;
             
-            // 2. Identify the original World coordinate beneath the start of the pinch
             const startMidScreenX = this.panStartMid.x - rect.left;
             const startMidScreenY = this.panStartMid.y - rect.top;
             const worldPivotX = (startMidScreenX - this.panStartVP.x) / this.pinchStartScale;
             const worldPivotY = (startMidScreenY - this.panStartVP.y) / this.pinchStartScale;
             
-            // 3. Identify where the fingers currently are
+            this.vp.scale = smoothedScale;
+            
             const currentMidScreenX = currentMid.x - rect.left;
             const currentMidScreenY = currentMid.y - rect.top;
             
-            // 4. Transform viewport so the world pivot perfectly matches the current finger position
-            this.vp.scale = clampedScale;
             this.vp.x = currentMidScreenX - (worldPivotX * this.vp.scale);
             this.vp.y = currentMidScreenY - (worldPivotY * this.vp.scale);
             
@@ -592,6 +657,12 @@ class InputHandler {
             this.canvas.parentElement.classList.remove('panning');
         }
 
+        if(this.pointers.size === 1) {
+            const pts = Array.from(this.pointers.values());
+            const rect = this.canvas.getBoundingClientRect();
+            this.pointers.set('pan', { x: pts[0].x - rect.left, y: pts[0].y - rect.top, vpX: this.vp.x, vpY: this.vp.y });
+        }
+
         if (this.pointers.size === 0) {
             document.removeEventListener('pointerup', this._boundUp);
             this.detachGlobalMove();
@@ -599,10 +670,20 @@ class InputHandler {
 
         if (this.ix.draggingPlayer) {
             const p = this.ix.draggingPlayer;
-            const dist = Math.hypot(p.x - this.ix.dragStart.x, p.y - this.ix.dragStart.y);
+            const rect = this.canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
             
-            if (dist < 3) this.app.openRadial(p); 
-            else this.state.save(); 
+            // Screen-Space Threshold (Eliminates mobile accidental drags)
+            const distMoved = Math.hypot(screenX - this.ix.startScreenX, screenY - this.ix.startScreenY);
+            
+            if (p.type === 'ball') {
+                const closest = this.state.f.players.find(ent => ent.type !== 'ball' && Math.hypot(ent.x - p.x, ent.y - p.y) < 35);
+                if (closest) { p.x = closest.x; p.y = closest.y; }
+            }
+
+            if (distMoved <= 5) this.app.openRadial(p); // Treat as Tap
+            else this.state.save(); // Treat as Drag
             
             this.ix.draggingPlayer = null;
             this.app.scheduleRender();
@@ -619,7 +700,7 @@ class App {
         this.cfg = { scale: 2.8, radius: 14, animSpeed: 1500 };
         
         this.state = new StateStore();
-        this.vp = new Viewport(this.canvas);
+        this.vp = new Viewport(this.canvas, this);
         this.renderer = new Renderer(this.canvas.getContext('2d'), this.vp, this.cfg);
         this.input = new InputHandler(this.canvas, this.vp, this.state, this.renderer, this);
         
@@ -630,7 +711,6 @@ class App {
         this.initUI();
         this.prePopulate();
         this.state.save();
-        this.scheduleRender();
     }
 
     prePopulate() {
@@ -641,18 +721,17 @@ class App {
         const b2 = {x: cx, y: cy - (60*s*Math.sqrt(2))};
         const b3 = {x: cx - (60*s*Math.cos(Math.PI/4)), y: cy - (60*s*Math.sin(Math.PI/4))};
 
-        // Precise positioning based on visual feedback
         add('1', 'def', cx, cy - (46*s));
         add('2', 'def', cx, cy + 35);
-        add('3', 'def', b1.x - 30, b1.y - 15);
+        add('3', 'def', b1.x + 10, b1.y - 45);
         add('4', 'def', b2.x + 40, b2.y + 15);
-        add('5', 'def', b3.x + 30, b3.y - 15);
+        add('5', 'def', b3.x - 10, b3.y - 45);
         add('6', 'def', b2.x - 40, b2.y + 15);
         add('7', 'def', b3.x - 40, b3.y - 140);
         add('8', 'def', b2.x, b2.y - 170);
         add('9', 'def', b1.x + 40, b1.y - 140);
         
-        add('B1', 'off', cx - 22, cy); // Left batter's box
+        add('B1', 'off', cx - 22, cy); 
         add('⚾', 'ball', cx, cy - (46*s));
     }
 
@@ -673,13 +752,18 @@ class App {
             this.state.save(); this.scheduleRender();
         });
 
-        document.getElementById('btn-undo').onclick = () => { if(this.state.undo()) this.syncUI(), this.scheduleRender(); };
-        document.getElementById('btn-redo').onclick = () => { if(this.state.redo()) this.syncUI(), this.scheduleRender(); };
+        document.getElementById('btn-undo').onclick = () => { if(this.state.undo()) this.renderer.clearCache(), this.syncUI(), this.scheduleRender(); };
+        document.getElementById('btn-redo').onclick = () => { if(this.state.redo()) this.renderer.clearCache(), this.syncUI(), this.scheduleRender(); };
         
         document.getElementById('btn-reset').onclick = () => {
-            if(confirm('Reset field to standard setup?')) {
-                this.state.f.players = []; this.state.f.lines = [];
-                this.prePopulate(); this.state.save(); this.scheduleRender();
+            if(confirm('Clear ALL frames and reset to the initial state?')) {
+                this.state.reset();
+                this.prePopulate();
+                this.state.save();
+                this.renderer.clearCache();
+                this.vp.centerOn(400, 500);
+                this.syncUI();
+                this.scheduleRender();
             }
         };
 
@@ -689,14 +773,14 @@ class App {
             nF.id = Date.now(); nF.name = `Frame ${this.state.frames.length + 1}`; nF.lines = [];
             nF.players.forEach(p => { const l = this.state.f.lines.find(li => li.startId === p.id); if(l) { p.x = l.end.x; p.y = l.end.y; }});
             this.state.frames.push(nF); this.state.currentIdx = this.state.frames.length - 1;
-            this.state.save(); this.syncUI(); this.scheduleRender();
+            this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
         };
 
         document.getElementById('btn-del-frame').onclick = () => {
             if(this.state.frames.length <= 1 || this.animating) return;
             this.state.frames.splice(this.state.currentIdx, 1);
             this.state.currentIdx = Math.max(0, this.state.currentIdx - 1);
-            this.state.save(); this.syncUI(); this.scheduleRender();
+            this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
         }
 
         document.getElementById('btn-play').onclick = () => this.toggleAnim();
@@ -709,13 +793,21 @@ class App {
             const rect = this.canvas.getBoundingClientRect();
             this.input.zoomAt(rect.left + rect.width/2, rect.top + rect.height/2, 0.8); 
         };
-        document.getElementById('btn-zoom-reset').onclick = () => { this.vp.scale = 1; this.vp.centerOn(400, 400); this.scheduleRender(); };
+        document.getElementById('btn-zoom-reset').onclick = () => { this.vp.scale = 1; this.vp.centerOn(400, 500); this.scheduleRender(); };
 
         document.querySelectorAll('.radial-btn').forEach(b => b.addEventListener('pointerdown', e => {
             e.stopPropagation(); this.executeAction(e.target.closest('.radial-btn').dataset.action);
         }));
         
         this.syncUI();
+    }
+
+    toast(msg) {
+        const t = document.getElementById('toast');
+        if(!t) return;
+        t.innerText = msg; t.classList.add('show');
+        clearTimeout(this._tTimer);
+        this._tTimer = setTimeout(() => t.classList.remove('show'), 2000);
     }
 
     syncUI() {
@@ -727,7 +819,7 @@ class App {
             
             const span = document.createElement('span'); span.className = 'frame-name';
             span.contentEditable = true; span.spellcheck = false; span.innerText = frm.name;
-            span.onclick = (e) => { e.stopPropagation(); this.state.currentIdx = i; this.syncUI(); this.scheduleRender(); };
+            span.onclick = (e) => { e.stopPropagation(); this.state.currentIdx = i; this.renderer.clearCache(); this.syncUI(); this.scheduleRender(); };
             span.onkeydown = (e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
             span.onblur = (e) => { 
                 let safeName = e.target.innerText.replace(/\n/g, '').slice(0, 30);
@@ -755,7 +847,33 @@ class App {
 
     executeAction(action) {
         const p = this.input.ix.activeEntity; this.closeRadial(); if(!p) return;
-        if(action === 'delete') { this.state.f.players = this.state.f.players.filter(ent => ent.id !== p.id); this.state.f.lines = this.state.f.lines.filter(l => l.startId !== p.id); this.state.save(); this.scheduleRender(); return; }
+        
+        if(action === 'delete') { 
+            this.state.f.players = this.state.f.players.filter(ent => ent.id !== p.id); 
+            this.state.f.lines = this.state.f.lines.filter(l => l.startId !== p.id); 
+            this.state.save(); this.scheduleRender(); 
+            return; 
+        }
+
+        if (action === 'throw' || action === 'hit') {
+            const ball = this.state.f.players.find(ent => ent.type === 'ball');
+            if (!ball) { this.toast('The ball is not on the field.'); return; }
+            
+            const dist = Math.hypot(p.x - ball.x, p.y - ball.y);
+            
+            if (p.type === 'ball' || dist <= 35) {
+                this.input.ix.drawingLine = { id: this.state.nextId++, startId: ball.id, type: action, start: {x: ball.x, y: ball.y}, end: {x: ball.x, y: ball.y} };
+                this.input.attachGlobalMove();
+            } else {
+                this.toast(`Player must be near the ball to ${action}`);
+            }
+            return;
+        }
+
+        if (action === 'run' && p.type === 'ball') {
+            this.toast('The ball cannot run routes.'); return;
+        }
+
         this.input.ix.drawingLine = { id: this.state.nextId++, startId: p.id, type: action, start: {x: p.x, y: p.y}, end: {x: p.x, y: p.y} };
         this.input.attachGlobalMove(); 
     }
