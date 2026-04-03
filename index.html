@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Diamond Playmaker Pro</title>
+    <style>
+        /* ============================================================
+           DESIGN TOKENS & UX FOUNDATION
+           ============================================================ */
+        :root {
+            --bg: #0f172a; --surface: #1e293b; --surface-hover: #334155; --border: #475569;
+            --text: #f8fafc; --text-muted: #94a3b8;
+            --accent: #3b82f6; --danger: #ef4444; --success: #10b981; --warning: #f59e0b;
+            --offense: #ef4444; --defense: #3b82f6; --ball: #ffffff;
+            --radius: 8px; --shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; user-select: none; -webkit-tap-highlight-color: transparent; }
+        body { display: flex; flex-direction: column; height: 100dvh; background: var(--bg); color: var(--text); overflow: hidden; }
+
+        /* ============================================================
+           LAYOUT & UI COMPONENTS
+           ============================================================ */
+        header { 
+            display: flex; justify-content: space-between; align-items: center; 
+            padding: 0.75rem 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 10;
+        }
+        .brand { font-weight: 800; font-size: 1.2rem; letter-spacing: -0.5px; }
+        .brand span { color: var(--accent); }
+        
+        .toolbar { display: flex; gap: 0.5rem; }
+        .btn { 
+            padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); 
+            background: var(--surface); color: var(--text); font-weight: 600; font-size: 0.85rem; 
+            cursor: pointer; transition: 0.15s ease; display: inline-flex; align-items: center; gap: 0.4rem;
+        }
+        .btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--text-muted); }
+        .btn:active:not(:disabled) { transform: scale(0.96); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
+        .btn-primary:hover:not(:disabled) { background: #2563eb; }
+        .btn-warning { background: var(--warning); border-color: var(--warning); color: #000; }
+        .btn-warning:hover:not(:disabled) { background: #d97706; }
+
+        .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
+        
+        aside { 
+            width: 280px; background: var(--bg); display: flex; flex-direction: column; 
+            border-right: 1px solid var(--border); overflow-y: auto; flex-shrink: 0; z-index: 5;
+        }
+        aside.right { border-right: none; border-left: 1px solid var(--border); }
+        
+        .panel { padding: 1rem; border-bottom: 1px solid var(--border); }
+        .panel h3 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); margin-bottom: 0.75rem; }
+
+        /* Frames */
+        #frame-list { display: flex; flex-direction: column; gap: 0.4rem; max-height: 300px; overflow-y: auto; margin-bottom: 0.5rem; }
+        .frame-item { 
+            padding: 0.6rem; background: var(--surface); border: 1px solid transparent; 
+            border-radius: var(--radius); cursor: pointer; font-size: 0.85rem; font-weight: 500; transition: 0.2s; 
+            display: flex; align-items: center;
+        }
+        .frame-item:hover { background: var(--surface-hover); }
+        .frame-item.active { background: rgba(59, 130, 246, 0.15); border-color: var(--accent); color: var(--accent); }
+        .frame-name { outline: none; border-bottom: 1px dashed transparent; width: 100%; transition: 0.2s; }
+        .frame-name:focus { border-bottom-color: var(--text); cursor: text; }
+
+        /* Palettes */
+        .palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+        .token { 
+            width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+            font-weight: 700; font-size: 0.9rem; cursor: grab; background: var(--surface); 
+            border: 2px solid var(--border); transition: 0.15s; margin: 0 auto;
+        }
+        .token:hover { border-color: var(--text-muted); transform: translateY(-2px); }
+        .token:active { cursor: grabbing; transform: scale(0.95); }
+        .token.off { border-color: var(--offense); }
+        .token.def { border-color: var(--defense); }
+        .token.ball { grid-column: span 3; font-size: 1.2rem; border-style: dashed; border-color: var(--text-muted); }
+
+        /* ============================================================
+           CANVAS & RADIAL MENU UX
+           ============================================================ */
+        main { flex: 1; display: flex; justify-content: center; align-items: center; background: #080c14; position: relative; overflow: hidden; padding: 1rem; }
+        canvas { 
+            max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--radius); 
+            box-shadow: var(--shadow); touch-action: none;
+        }
+        
+        #radial-menu {
+            position: absolute; width: 140px; height: 140px; border-radius: 50%; z-index: 100;
+            opacity: 0; transform: scale(0.8); pointer-events: none; transition: 0.15s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+        #radial-menu.active { opacity: 1; transform: scale(1); pointer-events: auto; }
+        
+        .radial-btn {
+            position: absolute; width: 44px; height: 44px; background: var(--surface); 
+            border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; 
+            justify-content: center; font-size: 1.1rem; cursor: pointer; box-shadow: var(--shadow);
+            transition: 0.1s ease; left: 48px; top: 48px; color: var(--text);
+        }
+        .radial-btn:hover { background: var(--accent); border-color: var(--accent); transform: scale(1.15); z-index: 10; }
+        .radial-btn[data-action="delete"]:hover { background: var(--danger); border-color: var(--danger); }
+        
+        .radial-btn:nth-child(1) { transform: translateY(-56px); } /* Run */
+        .radial-btn:nth-child(2) { transform: translate(48px, -28px); } /* Throw */
+        .radial-btn:nth-child(3) { transform: translate(48px, 28px); } /* Hit */
+        .radial-btn:nth-child(4) { transform: translateY(56px); } /* Delete */
+
+        .toast {
+            position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%) translateY(20px);
+            background: var(--text); color: var(--bg); padding: 0.6rem 1.2rem; border-radius: 20px;
+            font-size: 0.85rem; font-weight: 600; opacity: 0; pointer-events: none; transition: 0.3s;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        
+        /* Custom Scrollbars */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="brand">Diamond<span>PlayMaker</span>Pro</div>
+        <div class="toolbar">
+            <button class="btn" id="btn-undo" disabled>↶ Undo</button>
+            <button class="btn" id="btn-redo" disabled>↷ Redo</button>
+            <div style="width: 1px; background: var(--border); margin: 0 0.5rem;"></div>
+            <button class="btn btn-warning" id="btn-reset">🔄 Reset</button>
+            <button class="btn btn-primary" id="btn-play">▶ Play</button>
+        </div>
+    </header>
+
+    <div class="workspace">
+        <aside>
+            <div class="panel">
+                <h3>Frames</h3>
+                <div id="frame-list"></div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn" id="btn-add-frame" style="flex:1; justify-content:center;">+ Add</button>
+                    <button class="btn" id="btn-del-frame" style="flex:1; justify-content:center; color: var(--danger);">− Del</button>
+                </div>
+            </div>
+            <div class="panel" style="border-bottom: none; flex: 1;">
+                <h3>Instructions</h3>
+                <p style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5;">
+                    1. <b>Drag</b> players to the field.<br>
+                    2. <b>Click</b> a player to open the Action Menu.<br>
+                    3. <b>Click</b> a drawn line to delete it.<br>
+                    4. <b>Draw</b> lines, then click canvas to finalize.<br>
+                    5. <b>Click</b> a frame name to rename it.
+                </p>
+            </div>
+        </aside>
+
+        <main id="canvas-container">
+            <canvas id="field" width="800" height="800"></canvas>
+            
+            <div id="radial-menu">
+                <div class="radial-btn" data-action="run" title="Run Route">🏃</div>
+                <div class="radial-btn" data-action="throw" title="Throw Ball">⚾</div>
+                <div class="radial-btn" data-action="hit" title="Hit Arc">☄️</div>
+                <div class="radial-btn" data-action="delete" title="Delete">🗑️</div>
+            </div>
+
+            <div id="toast" class="toast">Action completed</div>
+        </main>
+
+        <aside class="right">
+            <div class="panel">
+                <h3>Equipment</h3>
+                <div class="palette" style="grid-template-columns: 1fr;">
+                    <div class="token ball" draggable="true" data-label="⚾" data-type="ball">⚾ BALL</div>
+                </div>
+            </div>
+            <div class="panel">
+                <h3>Defense (1-9)</h3>
+                <div class="palette" id="pal-def"></div>
+            </div>
+            <div class="panel" style="border-bottom: none;">
+                <h3>Offense</h3>
+                <div class="palette" id="pal-off"></div>
+            </div>
+        </aside>
+    </div>
+
+<script>
+class Playmaker {
+    constructor() {
+        this.canvas = document.getElementById('field');
+        this.ctx = this.canvas.getContext('2d');
+        this.radialMenu = document.getElementById('radial-menu');
+        this.container = document.getElementById('canvas-container');
+        
+        // Geometry / Engine Constants mapped to Little League (2.8x scaling)
+        this.CFG = { scale: 2.8, fps: 60, radius: 14, clickTol: 15, animSpeed: 1500 };
+        this.GEO = this.initGeometry();
+        this.COLORS = {
+            foul: '#0f172a', fair: '#16a34a', dirt: '#b45309', chalk: '#cbd5e1',
+            run: '#f59e0b', throw: '#ffffff', hit: '#f97316',
+            offense: '#ef4444', defense: '#3b82f6', hover: 'rgba(255,255,255,0.2)'
+        };
+
+        // State Machine
+        this.state = {
+            frames: [{ id: 1, name: 'Frame 1', players: [], lines: [] }],
+            currentIdx: 0, history: [], historyIdx: -1,
+            animating: false, pendingRedraw: false
+        };
+
+        // Interaction Context
+        this.ix = {
+            activeEntity: null, drawingLine: null, draggingPlayer: null,
+            mouseX: 0, mouseY: 0, nextId: 100
+        };
+
+        this.initUI();
+        this.prePopulate();
+        this.saveState();
+        this.bindEvents();
+        
+        // Trigger initial forced render so bases and shadows draw immediately
+        this.render();
+    }
+
+    initGeometry() {
+        const cx = 400, cy = 720, s = this.CFG.scale;
+        return {
+            HOME: {x: cx, y: cy}, MOUND: {x: cx, y: cy - (46 * s)}, // 46 ft pitching distance
+            B1: {x: cx + (60 * s * Math.cos(Math.PI/4)), y: cy - (60 * s * Math.sin(Math.PI/4))}, // 60 ft bases
+            B2: {x: cx, y: cy - (60 * s * Math.sqrt(2))},
+            B3: {x: cx - (60 * s * Math.cos(Math.PI/4)), y: cy - (60 * s * Math.sin(Math.PI/4))}
+        };
+    }
+
+    get f() { return this.state.frames[this.state.currentIdx]; }
+
+    // --- STATE MANAGEMENT ---
+    saveState() {
+        if (this.state.animating) return;
+        this.state.history = this.state.history.slice(0, this.state.historyIdx + 1);
+        this.state.history.push(JSON.stringify(this.state.frames));
+        if (this.state.history.length > 20) this.state.history.shift();
+        else this.state.historyIdx++;
+        this.syncUI();
+    }
+
+    loadState(offset) {
+        if (this.state.animating) return;
+        this.state.historyIdx += offset;
+        this.state.frames = JSON.parse(this.state.history[this.state.historyIdx]);
+        this.state.currentIdx = Math.min(this.state.currentIdx, this.state.frames.length - 1);
+        this.closeRadial(); this.syncUI(); this.render();
+    }
+
+    // --- UI CONTROLS ---
+    initUI() {
+        const def = document.getElementById('pal-def');
+        const off = document.getElementById('pal-off');
+        for(let i=1; i<=9; i++) def.innerHTML += `<div class="token def" draggable="true" data-type="def">${i}</div>`;
+        ['B1','B2','B3','B4'].forEach(l => off.innerHTML += `<div class="token off" draggable="true" data-type="off">${l}</div>`);
+        
+        document.querySelectorAll('.token').forEach(t => {
+            t.addEventListener('dragstart', e => {
+                e.dataTransfer.setData('label', e.target.innerText);
+                e.dataTransfer.setData('type', e.target.dataset.type);
+            });
+        });
+    }
+
+    prePopulate() {
+        const add = (lbl, typ, x, y) => this.f.players.push({id: this.ix.nextId++, label: lbl, type: typ, x, y});
+        
+        // Standard LL Setup
+        add('1', 'def', this.GEO.MOUND.x, this.GEO.MOUND.y - 12);
+        add('2', 'def', this.GEO.HOME.x, this.GEO.HOME.y + 25);
+        add('3', 'def', this.GEO.B1.x + 15, this.GEO.B1.y - 15);
+        add('4', 'def', this.GEO.B2.x + 35, this.GEO.B2.y + 15);
+        add('5', 'def', this.GEO.B3.x - 15, this.GEO.B3.y - 15);
+        add('6', 'def', this.GEO.B2.x - 35, this.GEO.B2.y + 15);
+        add('7', 'def', this.GEO.B3.x - 50, this.GEO.B3.y - 150);
+        add('8', 'def', this.GEO.B2.x, this.GEO.B2.y - 180);
+        add('9', 'def', this.GEO.B1.x + 50, this.GEO.B1.y - 150);
+        
+        // Batter
+        add('B1', 'off', this.GEO.HOME.x - 20, this.GEO.HOME.y - 5);
+        
+        // Pitcher possesses the ball initially
+        add('⚾', 'ball', this.GEO.MOUND.x, this.GEO.MOUND.y - 12);
+    }
+
+    syncUI() {
+        document.getElementById('btn-undo').disabled = this.state.historyIdx <= 0;
+        document.getElementById('btn-redo').disabled = this.state.historyIdx >= this.state.history.length - 1;
+        document.getElementById('btn-del-frame').disabled = this.state.frames.length <= 1;
+
+        const list = document.getElementById('frame-list');
+        list.innerHTML = '';
+        this.state.frames.forEach((frm, i) => {
+            const d = document.createElement('div');
+            d.className = `frame-item ${i === this.state.currentIdx ? 'active' : ''}`;
+            d.onclick = () => { this.state.currentIdx = i; this.closeRadial(); this.syncUI(); this.render(); };
+            
+            // Editable frame name
+            const span = document.createElement('span');
+            span.className = 'frame-name';
+            span.contentEditable = true;
+            span.spellcheck = false;
+            span.innerText = frm.name;
+            span.onclick = (e) => e.stopPropagation();
+            span.onkeydown = (e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
+            span.onblur = (e) => {
+                this.state.frames[i].name = e.target.innerText;
+                this.saveState();
+            };
+            
+            d.appendChild(span);
+            list.appendChild(d);
+        });
+    }
+
+    toast(msg) {
+        const t = document.getElementById('toast');
+        t.innerText = msg; t.classList.add('show');
+        clearTimeout(this._tTimer);
+        this._tTimer = setTimeout(() => t.classList.remove('show'), 2000);
+    }
+
+    // --- EVENTS & UX ---
+    bindEvents() {
+        this.canvas.addEventListener('dragover', e => e.preventDefault());
+        this.canvas.addEventListener('drop', e => {
+            e.preventDefault();
+            const pos = this.getMousePos(e);
+            this.f.players.push({id: this.ix.nextId++, label: e.dataTransfer.getData('label'), type: e.dataTransfer.getData('type'), x: pos.x, y: pos.y});
+            this.saveState(); this.render();
+        });
+
+        // Pointer Events (Mouse/Touch Agnostic)
+        this.canvas.addEventListener('pointerdown', e => this.handlePointerDown(e));
+        document.addEventListener('pointermove', e => this.handlePointerMove(e));
+        document.addEventListener('pointerup', e => this.handlePointerUp(e));
+
+        // Radial Menu Interception
+        document.querySelectorAll('.radial-btn').forEach(b => {
+            b.addEventListener('pointerdown', e => {
+                e.stopPropagation();
+                this.executeAction(e.target.closest('.radial-btn').dataset.action);
+            });
+        });
+
+        // App Buttons
+        document.getElementById('btn-undo').onclick = () => this.loadState(-1);
+        document.getElementById('btn-redo').onclick = () => this.loadState(1);
+        document.getElementById('btn-add-frame').onclick = () => this.addFrame();
+        document.getElementById('btn-del-frame').onclick = () => this.delFrame();
+        document.getElementById('btn-play').onclick = () => this.toggleAnim();
+        document.getElementById('btn-reset').onclick = () => {
+            if(confirm('Reset field to standard setup?')) {
+                this.f.players = []; this.f.lines = [];
+                this.prePopulate(); this.saveState(); this.render();
+            }
+        };
+    }
+
+    getMousePos(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        return { 
+            x: (e.clientX - rect.left) * (this.canvas.width / rect.width), 
+            y: (e.clientY - rect.top) * (this.canvas.height / rect.height) 
+        };
+    }
+
+    getEntityAt(pos) {
+        // Reverse array to select top-most entity (prioritizing ball if it's on top of a player)
+        return [...this.f.players].reverse().find(p => Math.hypot(pos.x - p.x, pos.y - p.y) <= this.CFG.radius + 2);
+    }
+
+    getLineAt(pos) {
+        this.ctx.lineWidth = 15; // Generous hit detection radius
+        for (let i = this.f.lines.length - 1; i >= 0; i--) {
+            const l = this.f.lines[i];
+            if (l.path2D && this.ctx.isPointInStroke(l.path2D, pos.x, pos.y)) return l;
+        }
+        return null;
+    }
+
+    // --- POINTER LOGIC ---
+    handlePointerDown(e) {
+        if(this.state.animating) return;
+        const pos = this.getMousePos(e);
+        this.ix.mouseX = pos.x; this.ix.mouseY = pos.y;
+        
+        // Finalize line drawing if active
+        if (this.ix.drawingLine) {
+            this.ix.drawingLine.end = pos;
+            this.f.lines.push(this.ix.drawingLine);
+            this.ix.drawingLine = null;
+            this.saveState(); this.render(); this.toast('Action mapped');
+            return;
+        }
+
+        const hit = this.getEntityAt(pos);
+        if (hit) {
+            this.ix.draggingPlayer = hit;
+            this.ix.dragStart = {x: hit.x, y: hit.y};
+            this.closeRadial();
+            return;
+        } 
+        
+        // Check for line hit to delete
+        const hitLine = this.getLineAt(pos);
+        if (hitLine) {
+            this.f.lines = this.f.lines.filter(l => l.id !== hitLine.id);
+            this.saveState(); this.render(); this.toast('Line deleted');
+            return;
+        }
+
+        this.closeRadial();
+    }
+
+    handlePointerMove(e) {
+        if (!this.ix.draggingPlayer && !this.ix.drawingLine) return;
+        const pos = this.getMousePos(e);
+        this.ix.mouseX = pos.x; this.ix.mouseY = pos.y;
+        
+        if (this.ix.draggingPlayer) {
+            this.ix.draggingPlayer.x = pos.x;
+            this.ix.draggingPlayer.y = pos.y;
+        }
+        this.scheduleRender();
+    }
+
+    handlePointerUp(e) {
+        if (this.ix.draggingPlayer) {
+            const p = this.ix.draggingPlayer;
+            const dist = Math.hypot(p.x - this.ix.dragStart.x, p.y - this.ix.dragStart.y);
+            
+            // Ball snapping mechanic
+            if (p.type === 'ball') {
+                const closest = this.f.players.find(ent => ent.type !== 'ball' && Math.hypot(ent.x - p.x, ent.y - p.y) < this.CFG.radius * 2.5);
+                if (closest) {
+                    p.x = closest.x;
+                    p.y = closest.y;
+                }
+            }
+
+            if (dist < 3) {
+                // Was a click -> Open Radial
+                this.openRadial(p);
+            } else {
+                // Was a drag -> Save
+                this.saveState();
+            }
+            this.ix.draggingPlayer = null;
+            this.render();
+        }
+    }
+
+    // --- RADIAL UX ---
+    openRadial(player) {
+        this.ix.activeEntity = player;
+        
+        const rect = this.canvas.getBoundingClientRect();
+        const containerRect = this.container.getBoundingClientRect();
+        
+        const scaleX = rect.width / this.canvas.width;
+        const scaleY = rect.height / this.canvas.height;
+        
+        // Accurate mapping from Canvas coordinates to DOM absolute positioning
+        const domX = (rect.left - containerRect.left) + (player.x * scaleX) - 70; // 70 = half menu width
+        const domY = (rect.top - containerRect.top) + (player.y * scaleY) - 70;
+        
+        this.radialMenu.style.left = `${domX}px`;
+        this.radialMenu.style.top = `${domY}px`;
+        this.radialMenu.classList.add('active');
+    }
+
+    closeRadial() {
+        this.radialMenu.classList.remove('active');
+        this.ix.activeEntity = null;
+    }
+
+    executeAction(action) {
+        const p = this.ix.activeEntity;
+        this.closeRadial();
+        if (!p) return;
+
+        if (action === 'delete') {
+            this.f.players = this.f.players.filter(ent => ent.id !== p.id);
+            this.f.lines = this.f.lines.filter(l => l.startId !== p.id);
+            this.saveState(); this.render(); this.toast('Deleted');
+            return;
+        }
+
+        // Action Validation & Ball Possession Logic
+        if (action === 'throw' || action === 'hit') {
+            const ball = this.f.players.find(ent => ent.type === 'ball');
+            if (!ball) { this.toast('Ball not on field.'); return; }
+            
+            const dist = Math.hypot(p.x - ball.x, p.y - ball.y);
+            
+            // Allow action if the clicked entity IS the ball, or if the clicked player POSSESSES the ball
+            if (p.type === 'ball' || dist <= this.CFG.radius * 2) {
+                this.ix.drawingLine = { id: this.ix.nextId++, startId: ball.id, type: action, start: {x: ball.x, y: ball.y}, end: {x: ball.x, y: ball.y} };
+                this.toast('Click destination to finalize line.');
+            } else {
+                this.toast(`Must possess the ball to ${action}`);
+            }
+            return;
+        }
+
+        if (action === 'run' && p.type === 'ball') { this.toast('The ball cannot run routes.'); return; }
+
+        this.ix.drawingLine = { id: this.ix.nextId++, startId: p.id, type: action, start: {x: p.x, y: p.y}, end: {x: p.x, y: p.y} };
+        this.toast('Click destination to finalize line.');
+    }
+
+    // --- FRAME LOGIC ---
+    addFrame() {
+        if(this.state.animating) return;
+        const nF = { 
+            id: Date.now(), 
+            name: `Frame ${this.state.frames.length + 1}`,
+            players: JSON.parse(JSON.stringify(this.f.players)), 
+            lines: [] 
+        };
+        
+        // Advance players along their lines
+        nF.players.forEach(p => {
+            const line = this.f.lines.find(l => l.startId === p.id);
+            if(line) { p.x = line.end.x; p.y = line.end.y; }
+        });
+
+        this.state.frames.push(nF);
+        this.state.currentIdx = this.state.frames.length - 1;
+        this.saveState();
+        this.syncUI();
+        this.render(); // Ensure snap is visually confirmed immediately
+    }
+
+    delFrame() {
+        if(this.state.frames.length <= 1) return;
+        this.state.frames.splice(this.state.currentIdx, 1);
+        this.state.currentIdx = Math.max(0, this.state.currentIdx - 1);
+        this.saveState();
+    }
+
+    // --- RENDER ENGINE ---
+    scheduleRender() {
+        if(!this.state.pendingRedraw) {
+            this.state.pendingRedraw = true;
+            requestAnimationFrame(() => { this.render(); this.state.pendingRedraw = false; });
+        }
+    }
+
+    render(progress = null, animIdx = null) {
+        this.ctx.clearRect(0,0, this.canvas.width, this.canvas.height);
+        this.drawField();
+
+        const isAnim = progress !== null;
+        const frame = isAnim ? this.state.frames[animIdx] : this.f;
+
+        // Draw Lines
+        const lines = isAnim ? frame.lines : [...frame.lines, this.ix.drawingLine].filter(Boolean);
+        lines.forEach(l => this.drawLine(l, isAnim ? progress : 1));
+
+        // Draw Players (Ball last to render on top)
+        const entities = [...frame.players].sort((a,b) => a.type === 'ball' ? 1 : -1);
+        entities.forEach(p => {
+            let dx = p.x, dy = p.y;
+            if(isAnim) {
+                const ml = frame.lines.find(l => l.startId === p.id);
+                if(ml) {
+                    if(ml.type === 'hit') {
+                        const cp = this.getArcCP(ml.start, ml.end);
+                        const pos = this.getBezier(progress, ml.start, cp, ml.end);
+                        dx = pos.x; dy = pos.y;
+                    } else {
+                        dx = ml.start.x + (ml.end.x - ml.start.x) * progress;
+                        dy = ml.start.y + (ml.end.y - ml.start.y) * progress;
+                    }
+                }
+            }
+            this.drawToken(dx, dy, p);
+        });
+
+        // Highlight active entity
+        if(this.ix.activeEntity && !isAnim) {
+            this.ctx.beginPath(); this.ctx.arc(this.ix.activeEntity.x, this.ix.activeEntity.y, this.CFG.radius+4, 0, Math.PI*2);
+            this.ctx.fillStyle = this.COLORS.hover; this.ctx.fill();
+        }
+    }
+
+    drawField() {
+        const c = this.ctx, F = 200 * this.CFG.scale; // 200 ft LL Fence
+        c.fillStyle = this.COLORS.foul; c.fillRect(0,0, 800, 800);
+        
+        // Fair Territory Clipping
+        c.save();
+        c.beginPath(); c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        c.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
+        c.arc(this.GEO.HOME.x, this.GEO.HOME.y, F, Math.PI*1.25, Math.PI*1.75);
+        c.lineTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        c.clip();
+
+        c.fillStyle = this.COLORS.fair; c.fill();
+        
+        // Infield Dirt Arc
+        c.beginPath(); c.arc(this.GEO.MOUND.x, this.GEO.MOUND.y, 50 * this.CFG.scale, 0, Math.PI*2);
+        c.fillStyle = this.COLORS.dirt; c.fill();
+        
+        // Infield Grass Diamond
+        c.beginPath();
+        const ins = 3 * this.CFG.scale;
+        c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y - 12*this.CFG.scale);
+        c.lineTo(this.GEO.B1.x - ins, this.GEO.B1.y);
+        c.lineTo(this.GEO.B2.x, this.GEO.B2.y + ins);
+        c.lineTo(this.GEO.B3.x + ins, this.GEO.B3.y);
+        c.fillStyle = this.COLORS.fair; c.fill();
+        
+        // Dirt Cutouts around bases
+        [this.GEO.HOME, this.GEO.MOUND, this.GEO.B1, this.GEO.B2, this.GEO.B3].forEach(b => {
+            c.beginPath(); c.arc(b.x, b.y, 8 * this.CFG.scale, 0, Math.PI*2);
+            c.fillStyle = this.COLORS.dirt; c.fill();
+        });
+        c.restore();
+
+        // Foul Lines
+        c.beginPath(); c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        c.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
+        c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        c.lineTo(this.GEO.HOME.x + F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
+        c.strokeStyle = this.COLORS.chalk; c.lineWidth = 2; c.stroke();
+
+        // Bases (White polygons)
+        c.fillStyle = '#fff'; c.strokeStyle = '#000'; c.lineWidth = 1.5;
+        [this.GEO.B1, this.GEO.B2, this.GEO.B3].forEach(b => {
+            c.beginPath();
+            const size = 6; 
+            c.moveTo(b.x, b.y - size); c.lineTo(b.x + size, b.y);
+            c.lineTo(b.x, b.y + size); c.lineTo(b.x - size, b.y);
+            c.closePath(); c.fill(); c.stroke();
+        });
+
+        // Home Plate
+        c.beginPath();
+        const hp = 6;
+        c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        c.lineTo(this.GEO.HOME.x - hp, this.GEO.HOME.y - hp);
+        c.lineTo(this.GEO.HOME.x - hp, this.GEO.HOME.y - hp*2);
+        c.lineTo(this.GEO.HOME.x + hp, this.GEO.HOME.y - hp*2);
+        c.lineTo(this.GEO.HOME.x + hp, this.GEO.HOME.y - hp);
+        c.closePath(); c.fill(); c.stroke();
+
+        // Pitcher's plate
+        c.fillStyle = '#fff';
+        c.fillRect(this.GEO.MOUND.x - 6, this.GEO.MOUND.y - 2, 12, 4);
+        c.strokeRect(this.GEO.MOUND.x - 6, this.GEO.MOUND.y - 2, 12, 4);
+    }
+
+    getArcCP(s, e) {
+        const mx = (s.x + e.x)/2, my = (s.y + e.y)/2;
+        return { x: mx + (e.x - this.GEO.HOME.x)*0.3, y: my - Math.hypot(e.x-s.x, e.y-s.y)*0.8 - 60 };
+    }
+    getBezier(t, s, cp, e) { return { x: (1-t)**2 * s.x + 2*(1-t)*t * cp.x + t**2 * e.x, y: (1-t)**2 * s.y + 2*(1-t)*t * cp.y + t**2 * e.y }; }
+
+    drawLine(l, p) {
+        const c = this.ctx;
+        const p2d = new Path2D();
+        p2d.moveTo(l.start.x, l.start.y);
+        
+        const actEnd = { x: l.start.x + (l.end.x - l.start.x) * (l === this.ix.drawingLine ? 1 : p), y: l.start.y + (l.end.y - l.start.y) * (l === this.ix.drawingLine ? 1 : p) };
+        if(l === this.ix.drawingLine) actEnd.x = this.ix.mouseX, actEnd.y = this.ix.mouseY;
+
+        if (l.type === 'run') {
+            c.shadowColor = 'rgba(0,0,0,0.8)'; c.shadowBlur = 4;
+            c.strokeStyle = this.COLORS.run; c.lineWidth = 4;
+            const dist = Math.hypot(actEnd.x - l.start.x, actEnd.y - l.start.y);
+            const ang = Math.atan2(actEnd.y - l.start.y, actEnd.x - l.start.x);
+            for(let i=0; i<dist; i+=4) p2d.lineTo(l.start.x + Math.cos(ang)*i + Math.cos(ang+Math.PI/2)*Math.sin(i*0.3)*4, l.start.y + Math.sin(ang)*i + Math.sin(ang+Math.PI/2)*Math.sin(i*0.3)*4);
+        } else if (l.type === 'throw') {
+            c.shadowBlur = 0; c.strokeStyle = this.COLORS.throw; c.lineWidth = 3; c.setLineDash([8,6]);
+            p2d.lineTo(actEnd.x, actEnd.y);
+        } else if (l.type === 'hit') {
+            c.shadowBlur = 0; c.strokeStyle = this.COLORS.hit; c.lineWidth = 4; c.setLineDash([12,8]);
+            const cp = this.getArcCP(l.start, l === this.ix.drawingLine ? actEnd : l.end);
+            for(let t=0; t<=(l === this.ix.drawingLine ? 1 : p); t+=0.02) { 
+                const pt = this.getBezier(t, l.start, cp, l === this.ix.drawingLine ? actEnd : l.end); 
+                p2d.lineTo(pt.x, pt.y); 
+            }
+        }
+        
+        // Cache Path2D on the line object for hit detection (only needed on finalized lines)
+        if (l !== this.ix.drawingLine) l.path2D = p2d;
+
+        c.stroke(p2d); c.setLineDash([]); c.shadowBlur = 0;
+    }
+
+    drawToken(x, y, p) {
+        const c = this.ctx;
+        c.shadowColor = 'rgba(0,0,0,0.6)'; c.shadowBlur = 6; c.shadowOffsetY = 2;
+        c.beginPath(); c.arc(x, y, this.CFG.radius, 0, Math.PI*2);
+        
+        if (p.type === 'ball') {
+            c.fillStyle = '#fff'; c.fill(); c.shadowBlur = 0;
+            c.strokeStyle = this.COLORS.offense; c.lineWidth = 2; c.setLineDash([3,2]); c.stroke(); c.setLineDash([]);
+            c.fillStyle = '#000'; c.font = '16px sans-serif';
+        } else {
+            c.fillStyle = p.type === 'off' ? this.COLORS.offense : this.COLORS.defense; c.fill();
+            c.shadowBlur = 0; c.strokeStyle = '#000'; c.lineWidth = 2; c.stroke();
+            c.fillStyle = '#fff'; c.font = 'bold 12px sans-serif';
+        }
+        c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(p.label, x, y);
+    }
+
+    // --- ANIMATION LOOP ---
+    toggleAnim() {
+        if(this.state.animating) return;
+        if(this.state.frames.length < 2) { this.toast("Add frames to animate."); return; }
+        
+        this.state.animating = true;
+        const btn = document.getElementById('btn-play');
+        btn.innerHTML = '⏹ Playing...'; btn.classList.replace('btn-primary', 'btn-danger');
+
+        let cIdx = 0, sTime = null;
+        const step = (ts) => {
+            if(!sTime) sTime = ts;
+            const p = Math.min((ts - sTime) / this.CFG.animSpeed, 1);
+            this.render(p, cIdx);
+
+            if(p < 1) requestAnimationFrame(step);
+            else {
+                cIdx++; sTime = null;
+                if(cIdx < this.state.frames.length) requestAnimationFrame(step);
+                else {
+                    this.state.animating = false;
+                    btn.innerHTML = '▶ Play'; btn.classList.replace('btn-danger', 'btn-primary');
+                    
+                    // Stop visually at the end state of the final frame
+                    this.state.currentIdx = this.state.frames.length - 1;
+                    this.syncUI();
+                    this.render(1.0, this.state.currentIdx);
+                }
+            }
+        };
+        requestAnimationFrame(step);
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => new Playmaker());
+</script>
+</body>
+</html>
