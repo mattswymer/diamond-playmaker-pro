@@ -8,15 +8,33 @@ class StateStore {
         this.nextId = 100;
     }
     get f() { return this.frames[this.currentIdx]; }
+
     save() {
         this.history = this.history.slice(0, this.historyIdx + 1);
         this.history.push(structuredClone(this.frames));
-        if (this.history.length > 20) this.history.shift(); 
-        else this.historyIdx++;
+        if (this.history.length > 20) {
+            this.history.shift();
+            // FIX: Do not increment historyIdx if we shifted. It stays at max length.
+        } else {
+            this.historyIdx++;
+        }
+        // Autosave
+        localStorage.setItem('diamond_autosave', JSON.stringify(this.frames));
     }
+
     undo() {
         if (this.historyIdx > 0) {
             this.historyIdx--;
+            this.frames = structuredClone(this.history[this.historyIdx]);
+            this.currentIdx = Math.min(this.currentIdx, this.frames.length - 1);
+            return true;
+        }
+        return false;
+    }
+
+    redo() {
+        if (this.historyIdx < this.history.length - 1) {
+            this.historyIdx++;
             this.frames = structuredClone(this.history[this.historyIdx]);
             this.currentIdx = Math.min(this.currentIdx, this.frames.length - 1);
             return true;
@@ -31,20 +49,24 @@ class Viewport {
         this.x = 0; this.y = 0; this._scale = 1;
         this.dpr = window.devicePixelRatio || 1;
         this.width = 0; this.height = 0;
-        
+
+        let resizeTimeout;
         this.resizeObserver = new ResizeObserver(entries => {
-            for (let entry of entries) {
-                if(entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-                    this.resize(entry.contentRect.width, entry.contentRect.height);
-                    if(this.width === entry.contentRect.width && !this.initialized) {
-                        this.centerOn(400, 500); this.initialized = true;
-                    }
-                    if(this.app) {
-                        if (this.app.input && this.app.input.ix.activeEntity) this.app.openRadial(this.app.input.ix.activeEntity);
-                        this.app.scheduleRender();
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(() => {
+                for (let entry of entries) {
+                    if(entry.contentRect.width > 0 && entry.contentRect.height > 0) {
+                        this.resize(entry.contentRect.width, entry.contentRect.height);
+                        if(this.width === entry.contentRect.width && !this.initialized) {
+                            this.centerOn(400, 500); this.initialized = true;
+                        }
+                        if(this.app) {
+                            if (this.app.input && this.app.input.ix.activeEntity) this.app.openRadial(this.app.input.ix.activeEntity);
+                            this.app.scheduleRender();
+                        }
                     }
                 }
-            }
+            }, 50); // Debounced resize
         });
         this.resizeObserver.observe(this.canvas.parentElement);
     }
@@ -86,7 +108,33 @@ class Renderer {
             B3: {x: cx - (60 * s * Math.cos(Math.PI/4)), y: cy - (60 * s * Math.sin(Math.PI/4))}
         };
         this.COLORS = { fair: '#16a34a', dirt: '#b45309', run: '#f59e0b', throw: '#ffffff', hit: '#f97316' };
+        this.buildFieldCache();
     }
+
+    // NEW: Offload heavy geometry calculations to run only once
+    buildFieldCache() {
+        const F = 200 * this.cfg.scale;
+        this.cache = { grass: new Path2D(), mound: new Path2D(), dirtPath: new Path2D(), bases: [] };
+
+        this.cache.grass.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        this.cache.grass.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
+        this.cache.grass.arc(this.GEO.HOME.x, this.GEO.HOME.y, F, Math.PI*1.25, Math.PI*1.75);
+        this.cache.grass.lineTo(this.GEO.HOME.x, this.GEO.HOME.y);
+
+        this.cache.mound.arc(this.GEO.MOUND.x, this.GEO.MOUND.y, 50 * this.cfg.scale, 0, Math.PI*2);
+
+        const ins = 3 * this.cfg.scale;
+        this.cache.dirtPath.moveTo(this.GEO.HOME.x, this.GEO.HOME.y - 12*this.cfg.scale);
+        this.cache.dirtPath.lineTo(this.GEO.B1.x - ins, this.GEO.B1.y);
+        this.cache.dirtPath.lineTo(this.GEO.B2.x, this.GEO.B2.y + ins);
+        this.cache.dirtPath.lineTo(this.GEO.B3.x + ins, this.GEO.B3.y);
+
+        [this.GEO.HOME, this.GEO.MOUND, this.GEO.B1, this.GEO.B2, this.GEO.B3].forEach(b => {
+            const p = new Path2D(); p.arc(b.x, b.y, 8 * this.cfg.scale, 0, Math.PI*2);
+            this.cache.bases.push(p);
+        });
+    }
+
     clearCache() { this.pathCache.clear(); }
     getVisualRadius(player) { return player.type === 'ball' ? this.cfg.radius * 0.7 : this.cfg.radius; }
 
@@ -113,18 +161,11 @@ class Renderer {
 
     drawField() {
         const c = this.ctx, F = 200 * this.cfg.scale;
-        c.save(); c.beginPath(); c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
-        c.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
-        c.arc(this.GEO.HOME.x, this.GEO.HOME.y, F, Math.PI*1.25, Math.PI*1.75);
-        c.lineTo(this.GEO.HOME.x, this.GEO.HOME.y); c.clip();
-        c.fillStyle = this.COLORS.fair; c.fill();
-        c.beginPath(); c.arc(this.GEO.MOUND.x, this.GEO.MOUND.y, 50 * this.cfg.scale, 0, Math.PI*2);
-        c.fillStyle = this.COLORS.dirt; c.fill();
-        c.beginPath(); const ins = 3 * this.cfg.scale;
-        c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y - 12*this.cfg.scale); c.lineTo(this.GEO.B1.x - ins, this.GEO.B1.y);
-        c.lineTo(this.GEO.B2.x, this.GEO.B2.y + ins); c.lineTo(this.GEO.B3.x + ins, this.GEO.B3.y);
-        c.fillStyle = this.COLORS.fair; c.fill();
-        [this.GEO.HOME, this.GEO.MOUND, this.GEO.B1, this.GEO.B2, this.GEO.B3].forEach(b => { c.beginPath(); c.arc(b.x, b.y, 8 * this.cfg.scale, 0, Math.PI*2); c.fillStyle = this.COLORS.dirt; c.fill(); });
+        c.save();
+        c.clip(this.cache.grass); c.fillStyle = this.COLORS.fair; c.fill(this.cache.grass);
+        c.fillStyle = this.COLORS.dirt; c.fill(this.cache.mound);
+        c.fillStyle = this.COLORS.fair; c.fill(this.cache.dirtPath);
+        c.fillStyle = this.COLORS.dirt; this.cache.bases.forEach(b => c.fill(b));
         c.restore();
 
         c.beginPath(); c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y); c.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
@@ -200,11 +241,20 @@ class InputHandler {
         this._boundUp = this.onPointerUp.bind(this);
 
         this.canvas.addEventListener('pointerdown', this._boundDown);
+
+        // KEYBOARD SHORTCUTS
         window.addEventListener('keydown', e => {
             this.keys[e.code] = true;
             if(e.code === 'Escape') {
                 if(this.ix.drawingLine) { this.ix.drawingLine = null; this.detachGlobalMove(); this.app.scheduleRender(); }
                 this.app.closeRadial();
+            }
+            if(e.ctrlKey || e.metaKey) {
+                if (e.code === 'KeyZ') { e.preventDefault(); if(e.shiftKey) { this.app.redoAction(); } else { this.app.undoAction(); } }
+                if (e.code === 'KeyY') { e.preventDefault(); this.app.redoAction(); }
+            }
+            if(e.code === 'Delete' || e.code === 'Backspace') {
+                if (this.ix.activeEntity) { e.preventDefault(); this.app.executeAction('delete'); }
             }
         });
         window.addEventListener('keyup', e => this.keys[e.code] = false);
@@ -223,10 +273,7 @@ class InputHandler {
         this.vp.scale *= zoomDelta;
         this.vp.x = mouseX - (worldPos.x * this.vp.scale); this.vp.y = mouseY - (worldPos.y * this.vp.scale);
         this.vp.clamp();
-
-        // Keep radial menu anchored to player while zooming
         if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
-
         this.app.scheduleRender();
     }
 
@@ -254,9 +301,8 @@ class InputHandler {
         const worldPos = this.vp.screenToWorld(screenX, screenY);
         this.ix.startScreenX = screenX; this.ix.startScreenY = screenY;
 
-        // Middle Click OR Spacebar Pan
         if (this.keys['Space'] || e.button === 1 || e.button === 2) {
-            this.app.closeRadial(); // Deselect on manual pan
+            this.app.closeRadial();
             this.ix.panStart = { x: screenX, y: screenY, vpX: this.vp.x, vpY: this.vp.y };
             this.canvas.parentElement.classList.add('panning');
             return;
@@ -275,13 +321,9 @@ class InputHandler {
             return Math.hypot(screenX - pScreen.x, screenY - pScreen.y) <= (this.renderer.getVisualRadius(p) + 8);
         });
 
-        // Player Clicked Logic
         if (hitPlayer) {
             this.ix.draggingPlayer = hitPlayer;
-            // Close the radial ONLY if we click on a DIFFERENT player
-            if (this.ix.activeEntity && this.ix.activeEntity.id !== hitPlayer.id) {
-                this.app.closeRadial();
-            }
+            if (this.ix.activeEntity && this.ix.activeEntity.id !== hitPlayer.id) this.app.closeRadial();
             return;
         }
 
@@ -289,14 +331,13 @@ class InputHandler {
         for (let i = this.state.f.lines.length - 1; i >= 0; i--) {
             const l = this.state.f.lines[i]; const p2d = this.renderer.generateLinePath(l);
             if (this.renderer.ctx.isPointInStroke(p2d, screenX * this.vp.dpr, screenY * this.vp.dpr)) {
-                this.app.closeRadial(); // Deselect if clicking a line
+                this.app.closeRadial();
                 this.state.f.lines.splice(i, 1);
                 this.renderer.clearCache();
                 this.state.save(); this.app.scheduleRender(); return;
             }
         }
 
-        // Left-Click empty space auto-pan (Deselects radial menu)
         this.app.closeRadial();
         this.ix.panStart = { x: screenX, y: screenY, vpX: this.vp.x, vpY: this.vp.y };
         this.canvas.parentElement.classList.add('panning');
@@ -306,7 +347,6 @@ class InputHandler {
         if(this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         const rect = this.canvas.getBoundingClientRect();
 
-        // Pinch Zoom Handling
         if (this.pointers.size === 2) {
             const pts = Array.from(this.pointers.values());
             const currentDist = this.getDistance(pts[0], pts[1]); const currentMid = this.getMidpoint(pts[0], pts[1]);
@@ -321,21 +361,16 @@ class InputHandler {
             const currentMidScreenX = currentMid.x - rect.left; const currentMidScreenY = currentMid.y - rect.top;
             this.vp.x = currentMidScreenX - (worldPivotX * this.vp.scale); this.vp.y = currentMidScreenY - (worldPivotY * this.vp.scale);
             this.vp.clamp();
-
-            // Keep radial menu anchored during pinch zoom
             if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
             this.app.scheduleRender(); return;
         }
 
         const screenX = e.clientX - rect.left; const screenY = e.clientY - rect.top;
 
-        // Canvas Panning Handling
         if (this.ix.panStart) {
             this.vp.x = this.ix.panStart.vpX + (screenX - this.ix.panStart.x);
             this.vp.y = this.ix.panStart.vpY + (screenY - this.ix.panStart.y);
             this.vp.clamp();
-
-            // Keep radial menu anchored during pan
             if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
             this.app.scheduleRender(); return;
         }
@@ -343,15 +378,10 @@ class InputHandler {
         const worldPos = this.vp.screenToWorld(screenX, screenY);
         this.ix.mouseX = worldPos.x; this.ix.mouseY = worldPos.y;
 
-        // Player Dragging Handling
         if (this.ix.draggingPlayer) {
-            this.ix.draggingPlayer.x = worldPos.x;
-            this.ix.draggingPlayer.y = worldPos.y;
-
-            // If the entity being dragged is the one with the open menu, move the menu with it
-            if (this.ix.activeEntity && this.ix.activeEntity.id === this.ix.draggingPlayer.id) {
-                this.app.openRadial(this.ix.draggingPlayer);
-            }
+            this.ix.draggingPlayer.x = worldPos.x; this.ix.draggingPlayer.y = worldPos.y;
+            // Hide radial menu while dragging
+            if (this.ix.activeEntity) this.app.closeRadial();
             this.app.scheduleRender();
         }
         else if (this.ix.drawingLine) { this.app.scheduleRender(); }
@@ -377,7 +407,6 @@ class InputHandler {
                 if (closest) { p.x = closest.x; p.y = closest.y; }
             }
 
-            // Treat as tap if moved less than 5px. Opens (or re-asserts) radial menu.
             if (distMoved <= 5) this.app.openRadial(p); else this.state.save();
             this.ix.draggingPlayer = null; this.app.scheduleRender();
         }
@@ -392,7 +421,17 @@ class App {
         this.renderer = new Renderer(this.canvas.getContext('2d'), this.vp, this.cfg);
         this.input = new InputHandler(this.canvas, this.vp, this.state, this.renderer, this);
         this.pendingRedraw = false; this.animating = false; this.animReq = null;
-        this.initUI(); this.prePopulate(); this.state.save();
+
+        // LOAD AUTOSAVE
+        const autosave = localStorage.getItem('diamond_autosave');
+        if (autosave) {
+            try { this.state.frames = JSON.parse(autosave); this.state.save(); }
+            catch(e) { this.prePopulate(); this.state.save(); }
+        } else {
+            this.prePopulate(); this.state.save();
+        }
+
+        this.initUI();
     }
 
     prePopulate() {
@@ -416,7 +455,8 @@ class App {
         document.querySelectorAll('.token').forEach(t => {
             t.addEventListener('pointerdown', e => {
                 e.preventDefault();
-                this.closeRadial(); // Clean up selection when adding new player
+                this.closeRadial();
+                if (navigator.vibrate) navigator.vibrate(15); // Haptic feedback
                 const centerScreenX = this.canvas.width / 2 / this.vp.dpr;
                 const centerScreenY = this.canvas.height / 2 / this.vp.dpr;
                 const wPos = this.vp.screenToWorld(centerScreenX, centerScreenY);
@@ -428,7 +468,9 @@ class App {
             });
         });
 
-        document.getElementById('btn-undo').onclick = () => { if(this.state.undo()) this.renderer.clearCache(), this.syncUI(), this.scheduleRender(); };
+        document.getElementById('btn-undo').onclick = () => this.undoAction();
+        document.getElementById('btn-redo').onclick = () => this.redoAction();
+
         document.getElementById('btn-reset').onclick = () => {
             if(confirm('Clear ALL frames and reset to the initial state?')) {
                 this.closeRadial();
@@ -441,19 +483,13 @@ class App {
         document.getElementById('btn-load').onclick = () => document.getElementById('file-load').click();
         document.getElementById('file-load').onchange = (e) => this.importPlaybook(e);
 
-        document.getElementById('btn-add-frame').onclick = () => {
-            if(this.animating) return;
-            this.closeRadial(); // Deselect on frame change
-            const nF = structuredClone(this.state.f); nF.id = Date.now(); nF.name = `Frame ${this.state.frames.length + 1}`; nF.lines = [];
-            nF.players.forEach(p => { const l = this.state.f.lines.find(li => li.startId === p.id); if(l) { p.x = l.end.x; p.y = l.end.y; }});
-            this.state.frames.push(nF); this.state.currentIdx = this.state.frames.length - 1;
-            this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
-            const list = document.getElementById('frame-list'); setTimeout(() => list.scrollTo({ left: list.scrollWidth, behavior: 'smooth' }), 50);
-        };
+        document.getElementById('btn-add-frame').onclick = () => this.addFrame(false);
+        document.getElementById('btn-dup-frame').onclick = () => this.addFrame(true);
 
         document.getElementById('btn-del-frame').onclick = () => {
             if(this.state.frames.length <= 1 || this.animating) return;
-            this.closeRadial(); // Deselect on frame change
+            if(!confirm('Delete current frame?')) return;
+            this.closeRadial();
             this.state.frames.splice(this.state.currentIdx, 1); this.state.currentIdx = Math.max(0, this.state.currentIdx - 1);
             this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
         }
@@ -471,6 +507,26 @@ class App {
         this.syncUI();
     }
 
+    addFrame(duplicate) {
+        if(this.animating) return;
+        this.closeRadial();
+        const nF = structuredClone(this.state.f); nF.id = Date.now(); nF.name = `Frame ${this.state.frames.length + 1}`;
+
+        if (duplicate) {
+            // Keep lines intact
+        } else {
+            nF.lines = [];
+            nF.players.forEach(p => { const l = this.state.f.lines.find(li => li.startId === p.id); if(l) { p.x = l.end.x; p.y = l.end.y; }});
+        }
+
+        this.state.frames.push(nF); this.state.currentIdx = this.state.frames.length - 1;
+        this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
+        const list = document.getElementById('frame-list'); setTimeout(() => list.scrollTo({ left: list.scrollWidth, behavior: 'smooth' }), 50);
+    }
+
+    undoAction() { if(this.state.undo()) { this.closeRadial(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender(); } }
+    redoAction() { if(this.state.redo()) { this.closeRadial(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender(); } }
+
     toast(msg) {
         const t = document.getElementById('toast'); if(!t) return;
         t.innerText = msg; t.classList.add('show');
@@ -479,18 +535,15 @@ class App {
 
     syncUI() {
         document.getElementById('btn-undo').disabled = this.state.historyIdx <= 0;
+        document.getElementById('btn-redo').disabled = this.state.historyIdx >= this.state.history.length - 1;
         const list = document.getElementById('frame-list'); list.innerHTML = '';
         this.state.frames.forEach((frm, i) => {
             const d = document.createElement('div'); d.className = `frame-item ${i === this.state.currentIdx ? 'active' : ''}`;
             const span = document.createElement('span'); span.className = 'frame-name';
             span.contentEditable = true; span.spellcheck = false; span.innerText = frm.name;
             span.onclick = (e) => {
-                e.stopPropagation();
-                this.closeRadial(); // Deselect on frame change
-                this.state.currentIdx = i;
-                this.renderer.clearCache();
-                this.syncUI();
-                this.scheduleRender();
+                e.stopPropagation(); this.closeRadial();
+                this.state.currentIdx = i; this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
             };
             span.onkeydown = (e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
             span.onblur = (e) => { let safeName = e.target.innerText.replace(/\n/g, '').slice(0, 30); e.target.innerText = safeName; this.state.frames[i].name = safeName; this.state.save(); };
@@ -515,8 +568,7 @@ class App {
         if(action === 'delete') {
             this.state.f.players = this.state.f.players.filter(ent => ent.id !== p.id);
             this.state.f.lines = this.state.f.lines.filter(l => l.startId !== p.id);
-            this.renderer.clearCache();
-            this.state.save(); this.scheduleRender(); return;
+            this.renderer.clearCache(); this.state.save(); this.scheduleRender(); return;
         }
         if (action === 'throw' || action === 'hit') {
             const ball = this.state.f.players.find(ent => ent.type === 'ball');
@@ -574,6 +626,7 @@ class App {
         const btn = document.getElementById('btn-export');
         const origText = btn.innerHTML;
         btn.innerHTML = '⏺ Rec...'; btn.classList.add('btn-danger');
+        btn.disabled = true; // Disable to prevent double-click crashes
 
         const stream = this.canvas.captureStream(30);
         const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
@@ -584,7 +637,7 @@ class App {
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a'); a.href = url; a.download = 'playmaker-export.webm';
             a.click(); URL.revokeObjectURL(url);
-            btn.innerHTML = origText; btn.classList.remove('btn-danger');
+            btn.innerHTML = origText; btn.classList.remove('btn-danger'); btn.disabled = false;
             this.toast('Video Exported!');
         };
 
@@ -618,12 +671,8 @@ class App {
         const data = JSON.stringify(this.state.frames, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `playbook-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        this.toast('Playbook Saved!');
+        const a = document.createElement('a'); a.href = url; a.download = `playbook-${new Date().toISOString().split('T')[0]}.json`;
+        a.click(); URL.revokeObjectURL(url); this.toast('Playbook Saved!');
     }
 
     importPlaybook(e) {
@@ -634,7 +683,8 @@ class App {
         reader.onload = (event) => {
             try {
                 const parsedData = JSON.parse(event.target.result);
-                if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].players) {
+                // Strict validation schema check
+                if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].players && parsedData[0].lines) {
                     this.state.frames = parsedData;
                     this.state.currentIdx = 0;
                     this.state.history = [];
@@ -647,7 +697,7 @@ class App {
                     });
                     this.state.nextId = maxId + 1;
 
-                    this.closeRadial(); // Clean up selection
+                    this.closeRadial();
                     this.state.save();
                     this.renderer.clearCache();
                     this.vp.centerOn(400, 500);

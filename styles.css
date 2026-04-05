@@ -82,7 +82,7 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
         overflow-x: auto;
         overflow-y: hidden;
         align-items: center;
-        max-height: 85px;
+        max-height: 100px;
         padding: 0.5rem;
         -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
     }

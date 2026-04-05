@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Diamond Playmaker Pro | Architect V7.0</title>
+    <title>Diamond Playmaker Pro | Architect V8.0</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -11,7 +11,8 @@
     <header>
         <div class="brand">Diamond<span>Architect</span></div>
         <div class="toolbar">
-            <button class="btn" id="btn-undo" disabled>↶ Undo</button>
+            <button class="btn" id="btn-undo" title="Ctrl+Z" disabled>↶ Undo</button>
+            <button class="btn" id="btn-redo" title="Ctrl+Y" disabled>↷ Redo</button>
             <button class="btn btn-warning" id="btn-reset">🔄 Reset</button>
             <div style="width: 1px; background: var(--border); margin: 0 0.2rem;"></div>
             <button class="btn" id="btn-save">💾 Save</button>
@@ -29,8 +30,9 @@
                 <h3>Frames</h3>
                 <div id="frame-list"></div>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button class="btn" id="btn-add-frame" style="flex:1;">+ Add</button>
-                    <button class="btn" id="btn-del-frame" style="flex:1; color: var(--danger);">− Del</button>
+                    <button class="btn" id="btn-add-frame" style="flex:1;" title="New Frame">+ Add</button>
+                    <button class="btn" id="btn-dup-frame" style="flex:1;" title="Duplicate Frame">⧉ Dup</button>
+                    <button class="btn" id="btn-del-frame" style="flex:1; color: var(--danger);" title="Delete Frame">− Del</button>
                 </div>
             </div>
             <div class="panel" style="border-bottom: none; flex: 1;">
@@ -40,7 +42,7 @@
                     <b>Click & Drag Canvas</b> to Pan.<br>
                     <b>Tap Palette Item</b> to place on field.<br>
                     <b>Click Player</b> for Action Menu.<br>
-                    <b>Click Line</b> to Delete.
+                    <b>Shortcuts:</b> Ctrl+Z, Ctrl+Y, Del.
                 </p>
             </div>
         </aside>
