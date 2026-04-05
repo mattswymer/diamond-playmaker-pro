@@ -39,7 +39,10 @@ class Viewport {
                     if(this.width === entry.contentRect.width && !this.initialized) {
                         this.centerOn(400, 500); this.initialized = true;
                     }
-                    if(this.app) this.app.scheduleRender();
+                    if(this.app) {
+                        if (this.app.input && this.app.input.ix.activeEntity) this.app.openRadial(this.app.input.ix.activeEntity);
+                        this.app.scheduleRender();
+                    }
                 }
             }
         });
@@ -86,7 +89,7 @@ class Renderer {
     }
     clearCache() { this.pathCache.clear(); }
     getVisualRadius(player) { return player.type === 'ball' ? this.cfg.radius * 0.7 : this.cfg.radius; }
-    
+
     draw(state, inputIx, progress = null, animFrame = null) {
         this.vp.resetToScreenSpace();
         this.ctx.clearRect(0, 0, this.ctx.canvas.width, this.ctx.canvas.height);
@@ -148,7 +151,7 @@ class Renderer {
             const dist = Math.hypot(actEnd.x - l.start.x, actEnd.y - l.start.y);
             const ang = Math.atan2(actEnd.y - l.start.y, actEnd.x - l.start.x);
             for(let i=0; i<dist; i+=4) p2d.lineTo(l.start.x + Math.cos(ang)*i + Math.cos(ang+Math.PI/2)*Math.sin(i*0.3)*4, l.start.y + Math.sin(ang)*i + Math.sin(ang+Math.PI/2)*Math.sin(i*0.3)*4);
-        } else if (l.type === 'throw') { p2d.lineTo(actEnd.x, actEnd.y); } 
+        } else if (l.type === 'throw') { p2d.lineTo(actEnd.x, actEnd.y); }
         else if (l.type === 'hit') {
             const cp = this.getArcCP(l.start, isDrawing ? actEnd : l.end);
             for(let t=0; t<=progress; t+=0.02) { const pt = this.getBezier(t, l.start, cp, isDrawing ? actEnd : l.end); p2d.lineTo(pt.x, pt.y); }
@@ -159,8 +162,8 @@ class Renderer {
 
     drawLine(l, p, inputIx) {
         const c = this.ctx; const p2d = this.generateLinePath(l, p, inputIx);
-        if (l.type === 'run') { c.strokeStyle = this.COLORS.run; c.lineWidth = 4; } 
-        else if (l.type === 'throw') { c.strokeStyle = this.COLORS.throw; c.lineWidth = 3; c.setLineDash([8,6]); } 
+        if (l.type === 'run') { c.strokeStyle = this.COLORS.run; c.lineWidth = 4; }
+        else if (l.type === 'throw') { c.strokeStyle = this.COLORS.throw; c.lineWidth = 3; c.setLineDash([8,6]); }
         else if (l.type === 'hit') { c.strokeStyle = this.COLORS.hit; c.lineWidth = 4; c.setLineDash([12,8]); }
         c.stroke(p2d); c.setLineDash([]);
     }
@@ -168,9 +171,9 @@ class Renderer {
     drawToken(screenX, screenY, p, isActive) {
         const c = this.ctx; const radius = this.getVisualRadius(p);
         c.beginPath(); c.arc(screenX, screenY, radius, 0, Math.PI*2);
-        c.fillStyle = p.type === 'ball' ? '#fff' : (p.type === 'off' ? '#ef4444' : '#3b82f6'); c.fill(); 
+        c.fillStyle = p.type === 'ball' ? '#fff' : (p.type === 'off' ? '#ef4444' : '#3b82f6'); c.fill();
         c.strokeStyle = p.type === 'ball' ? '#ef4444' : '#000'; c.lineWidth = 2; c.stroke();
-        c.fillStyle = p.type === 'ball' ? '#000' : '#fff'; c.font = p.type === 'ball' ? '12px sans-serif' : 'bold 12px sans-serif'; 
+        c.fillStyle = p.type === 'ball' ? '#000' : '#fff'; c.font = p.type === 'ball' ? '12px sans-serif' : 'bold 12px sans-serif';
         c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText(p.label, screenX, screenY);
         if(isActive) { c.beginPath(); c.arc(screenX, screenY, radius+4, 0, Math.PI*2); c.fillStyle = 'rgba(255,255,255,0.2)'; c.fill(); }
     }
@@ -189,13 +192,13 @@ class InputHandler {
         this.canvas = canvas; this.vp = viewport; this.state = state; this.renderer = renderer; this.app = app;
         this.ix = { activeEntity: null, drawingLine: null, draggingPlayer: null, panStart: null, mouseX: 0, mouseY: 0, startScreenX: 0, startScreenY: 0 };
         this.keys = {}; this.pointers = new Map();
-        
-        this.canvas.addEventListener('contextmenu', e => e.preventDefault()); 
-        
+
+        this.canvas.addEventListener('contextmenu', e => e.preventDefault());
+
         this._boundDown = this.onPointerDown.bind(this);
         this._boundMove = this.onPointerMove.bind(this);
         this._boundUp = this.onPointerUp.bind(this);
-        
+
         this.canvas.addEventListener('pointerdown', this._boundDown);
         window.addEventListener('keydown', e => {
             this.keys[e.code] = true;
@@ -205,7 +208,7 @@ class InputHandler {
             }
         });
         window.addEventListener('keyup', e => this.keys[e.code] = false);
-        
+
         this.canvas.addEventListener('wheel', e => {
             e.preventDefault();
             const zoomFactor = Math.max(0.95, Math.min(1.05, Math.exp(-e.deltaY * 0.002)));
@@ -219,7 +222,12 @@ class InputHandler {
         const worldPos = this.vp.screenToWorld(mouseX, mouseY);
         this.vp.scale *= zoomDelta;
         this.vp.x = mouseX - (worldPos.x * this.vp.scale); this.vp.y = mouseY - (worldPos.y * this.vp.scale);
-        this.vp.clamp(); this.app.scheduleRender();
+        this.vp.clamp();
+
+        // Keep radial menu anchored to player while zooming
+        if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
+
+        this.app.scheduleRender();
     }
 
     attachGlobalMove() { document.addEventListener('pointermove', this._boundMove); }
@@ -237,7 +245,7 @@ class InputHandler {
             this.pinchStartScale = this.vp.scale;
             this.panStartMid = this.getMidpoint(pts[0], pts[1]);
             this.panStartVP = { x: this.vp.x, y: this.vp.y };
-            this.ix.draggingPlayer = null; 
+            this.ix.draggingPlayer = null;
             return;
         }
 
@@ -246,7 +254,9 @@ class InputHandler {
         const worldPos = this.vp.screenToWorld(screenX, screenY);
         this.ix.startScreenX = screenX; this.ix.startScreenY = screenY;
 
+        // Middle Click OR Spacebar Pan
         if (this.keys['Space'] || e.button === 1 || e.button === 2) {
+            this.app.closeRadial(); // Deselect on manual pan
             this.ix.panStart = { x: screenX, y: screenY, vpX: this.vp.x, vpY: this.vp.y };
             this.canvas.parentElement.classList.add('panning');
             return;
@@ -265,22 +275,28 @@ class InputHandler {
             return Math.hypot(screenX - pScreen.x, screenY - pScreen.y) <= (this.renderer.getVisualRadius(p) + 8);
         });
 
-        if (hitPlayer) { 
-            this.ix.draggingPlayer = hitPlayer; 
-            this.app.closeRadial(); 
-            return; 
+        // Player Clicked Logic
+        if (hitPlayer) {
+            this.ix.draggingPlayer = hitPlayer;
+            // Close the radial ONLY if we click on a DIFFERENT player
+            if (this.ix.activeEntity && this.ix.activeEntity.id !== hitPlayer.id) {
+                this.app.closeRadial();
+            }
+            return;
         }
 
-        this.renderer.vp.apply(); this.renderer.ctx.lineWidth = 20 / this.vp.scale; 
+        this.renderer.vp.apply(); this.renderer.ctx.lineWidth = 20 / this.vp.scale;
         for (let i = this.state.f.lines.length - 1; i >= 0; i--) {
             const l = this.state.f.lines[i]; const p2d = this.renderer.generateLinePath(l);
             if (this.renderer.ctx.isPointInStroke(p2d, screenX * this.vp.dpr, screenY * this.vp.dpr)) {
+                this.app.closeRadial(); // Deselect if clicking a line
                 this.state.f.lines.splice(i, 1);
-                this.renderer.clearCache(); 
+                this.renderer.clearCache();
                 this.state.save(); this.app.scheduleRender(); return;
             }
         }
 
+        // Left-Click empty space auto-pan (Deselects radial menu)
         this.app.closeRadial();
         this.ix.panStart = { x: screenX, y: screenY, vpX: this.vp.x, vpY: this.vp.y };
         this.canvas.parentElement.classList.add('panning');
@@ -289,58 +305,79 @@ class InputHandler {
     onPointerMove(e) {
         if(this.pointers.has(e.pointerId)) this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
         const rect = this.canvas.getBoundingClientRect();
-        
+
+        // Pinch Zoom Handling
         if (this.pointers.size === 2) {
             const pts = Array.from(this.pointers.values());
             const currentDist = this.getDistance(pts[0], pts[1]); const currentMid = this.getMidpoint(pts[0], pts[1]);
             const rawTargetScale = this.pinchStartScale * (currentDist / this.pinchStartDist);
             const smoothedScale = this.vp.scale + (rawTargetScale - this.vp.scale) * 0.4;
-            
+
             const startMidScreenX = this.panStartMid.x - rect.left; const startMidScreenY = this.panStartMid.y - rect.top;
             const worldPivotX = (startMidScreenX - this.panStartVP.x) / this.pinchStartScale;
             const worldPivotY = (startMidScreenY - this.panStartVP.y) / this.pinchStartScale;
-            
+
             this.vp.scale = smoothedScale;
             const currentMidScreenX = currentMid.x - rect.left; const currentMidScreenY = currentMid.y - rect.top;
             this.vp.x = currentMidScreenX - (worldPivotX * this.vp.scale); this.vp.y = currentMidScreenY - (worldPivotY * this.vp.scale);
-            this.vp.clamp(); this.app.scheduleRender(); return;
+            this.vp.clamp();
+
+            // Keep radial menu anchored during pinch zoom
+            if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
+            this.app.scheduleRender(); return;
         }
 
         const screenX = e.clientX - rect.left; const screenY = e.clientY - rect.top;
 
+        // Canvas Panning Handling
         if (this.ix.panStart) {
-            this.vp.x = this.ix.panStart.vpX + (screenX - this.ix.panStart.x); 
+            this.vp.x = this.ix.panStart.vpX + (screenX - this.ix.panStart.x);
             this.vp.y = this.ix.panStart.vpY + (screenY - this.ix.panStart.y);
-            this.vp.clamp(); this.app.scheduleRender(); return;
+            this.vp.clamp();
+
+            // Keep radial menu anchored during pan
+            if (this.ix.activeEntity) this.app.openRadial(this.ix.activeEntity);
+            this.app.scheduleRender(); return;
         }
 
         const worldPos = this.vp.screenToWorld(screenX, screenY);
         this.ix.mouseX = worldPos.x; this.ix.mouseY = worldPos.y;
 
-        if (this.ix.draggingPlayer) { this.ix.draggingPlayer.x = worldPos.x; this.ix.draggingPlayer.y = worldPos.y; this.app.scheduleRender(); } 
+        // Player Dragging Handling
+        if (this.ix.draggingPlayer) {
+            this.ix.draggingPlayer.x = worldPos.x;
+            this.ix.draggingPlayer.y = worldPos.y;
+
+            // If the entity being dragged is the one with the open menu, move the menu with it
+            if (this.ix.activeEntity && this.ix.activeEntity.id === this.ix.draggingPlayer.id) {
+                this.app.openRadial(this.ix.draggingPlayer);
+            }
+            this.app.scheduleRender();
+        }
         else if (this.ix.drawingLine) { this.app.scheduleRender(); }
     }
 
     onPointerUp(e) {
         this.pointers.delete(e.pointerId);
-        
-        if (this.pointers.size === 0) { 
+
+        if (this.pointers.size === 0) {
             this.ix.panStart = null;
             this.canvas.parentElement.classList.remove('panning');
-            document.removeEventListener('pointerup', this._boundUp); 
-            this.detachGlobalMove(); 
+            document.removeEventListener('pointerup', this._boundUp);
+            this.detachGlobalMove();
         }
 
         if (this.ix.draggingPlayer) {
             const p = this.ix.draggingPlayer; const rect = this.canvas.getBoundingClientRect();
             const screenX = e.clientX - rect.left; const screenY = e.clientY - rect.top;
             const distMoved = Math.hypot(screenX - this.ix.startScreenX, screenY - this.ix.startScreenY);
-            
+
             if (p.type === 'ball') {
                 const closest = this.state.f.players.find(ent => ent.type !== 'ball' && Math.hypot(ent.x - p.x, ent.y - p.y) < 35);
                 if (closest) { p.x = closest.x; p.y = closest.y; }
             }
 
+            // Treat as tap if moved less than 5px. Opens (or re-asserts) radial menu.
             if (distMoved <= 5) this.app.openRadial(p); else this.state.save();
             this.ix.draggingPlayer = null; this.app.scheduleRender();
         }
@@ -375,10 +412,11 @@ class App {
         const def = document.getElementById('pal-def'); const off = document.getElementById('pal-off');
         for(let i=1; i<=9; i++) def.innerHTML += `<div class="token def" data-type="def">${i}</div>`;
         ['B1','B2','B3','B4'].forEach(l => off.innerHTML += `<div class="token off" data-type="off">${l}</div>`);
-        
+
         document.querySelectorAll('.token').forEach(t => {
             t.addEventListener('pointerdown', e => {
                 e.preventDefault();
+                this.closeRadial(); // Clean up selection when adding new player
                 const centerScreenX = this.canvas.width / 2 / this.vp.dpr;
                 const centerScreenY = this.canvas.height / 2 / this.vp.dpr;
                 const wPos = this.vp.screenToWorld(centerScreenX, centerScreenY);
@@ -390,22 +428,22 @@ class App {
             });
         });
 
-        // Event Listeners for standard buttons
         document.getElementById('btn-undo').onclick = () => { if(this.state.undo()) this.renderer.clearCache(), this.syncUI(), this.scheduleRender(); };
         document.getElementById('btn-reset').onclick = () => {
             if(confirm('Clear ALL frames and reset to the initial state?')) {
+                this.closeRadial();
                 this.state.reset(); this.prePopulate(); this.state.save(); this.renderer.clearCache();
                 this.vp.centerOn(400, 500); this.syncUI(); this.scheduleRender();
             }
         };
 
-        // Event Listeners for Save/Load functionality
         document.getElementById('btn-save').onclick = () => this.exportPlaybook();
         document.getElementById('btn-load').onclick = () => document.getElementById('file-load').click();
         document.getElementById('file-load').onchange = (e) => this.importPlaybook(e);
 
         document.getElementById('btn-add-frame').onclick = () => {
             if(this.animating) return;
+            this.closeRadial(); // Deselect on frame change
             const nF = structuredClone(this.state.f); nF.id = Date.now(); nF.name = `Frame ${this.state.frames.length + 1}`; nF.lines = [];
             nF.players.forEach(p => { const l = this.state.f.lines.find(li => li.startId === p.id); if(l) { p.x = l.end.x; p.y = l.end.y; }});
             this.state.frames.push(nF); this.state.currentIdx = this.state.frames.length - 1;
@@ -415,13 +453,14 @@ class App {
 
         document.getElementById('btn-del-frame').onclick = () => {
             if(this.state.frames.length <= 1 || this.animating) return;
+            this.closeRadial(); // Deselect on frame change
             this.state.frames.splice(this.state.currentIdx, 1); this.state.currentIdx = Math.max(0, this.state.currentIdx - 1);
             this.state.save(); this.renderer.clearCache(); this.syncUI(); this.scheduleRender();
         }
 
-        document.getElementById('btn-play').onclick = () => this.toggleAnim();
-        document.getElementById('btn-export').onclick = () => this.exportVideo();
-        
+        document.getElementById('btn-play').onclick = () => { this.closeRadial(); this.toggleAnim(); };
+        document.getElementById('btn-export').onclick = () => { this.closeRadial(); this.exportVideo(); };
+
         document.getElementById('btn-zoom-in').onclick = () => { const r = this.canvas.getBoundingClientRect(); this.input.zoomAt(r.left + r.width/2, r.top + r.height/2, 1.2); };
         document.getElementById('btn-zoom-out').onclick = () => { const r = this.canvas.getBoundingClientRect(); this.input.zoomAt(r.left + r.width/2, r.top + r.height/2, 0.8); };
         document.getElementById('btn-zoom-reset').onclick = () => { this.vp.scale = 1; this.vp.centerOn(400, 500); this.scheduleRender(); };
@@ -445,7 +484,14 @@ class App {
             const d = document.createElement('div'); d.className = `frame-item ${i === this.state.currentIdx ? 'active' : ''}`;
             const span = document.createElement('span'); span.className = 'frame-name';
             span.contentEditable = true; span.spellcheck = false; span.innerText = frm.name;
-            span.onclick = (e) => { e.stopPropagation(); this.state.currentIdx = i; this.renderer.clearCache(); this.syncUI(); this.scheduleRender(); };
+            span.onclick = (e) => {
+                e.stopPropagation();
+                this.closeRadial(); // Deselect on frame change
+                this.state.currentIdx = i;
+                this.renderer.clearCache();
+                this.syncUI();
+                this.scheduleRender();
+            };
             span.onkeydown = (e) => { if(e.key === 'Enter') { e.preventDefault(); e.target.blur(); } };
             span.onblur = (e) => { let safeName = e.target.innerText.replace(/\n/g, '').slice(0, 30); e.target.innerText = safeName; this.state.frames[i].name = safeName; this.state.save(); };
             d.appendChild(span); list.appendChild(d);
@@ -459,15 +505,18 @@ class App {
         menu.classList.add('active');
     }
 
-    closeRadial() { document.getElementById('radial-menu').classList.remove('active'); this.input.ix.activeEntity = null; }
+    closeRadial() {
+        document.getElementById('radial-menu').classList.remove('active');
+        this.input.ix.activeEntity = null;
+    }
 
     executeAction(action) {
         const p = this.input.ix.activeEntity; this.closeRadial(); if(!p) return;
-        if(action === 'delete') { 
-            this.state.f.players = this.state.f.players.filter(ent => ent.id !== p.id); 
-            this.state.f.lines = this.state.f.lines.filter(l => l.startId !== p.id); 
-            this.renderer.clearCache(); 
-            this.state.save(); this.scheduleRender(); return; 
+        if(action === 'delete') {
+            this.state.f.players = this.state.f.players.filter(ent => ent.id !== p.id);
+            this.state.f.lines = this.state.f.lines.filter(l => l.startId !== p.id);
+            this.renderer.clearCache();
+            this.state.save(); this.scheduleRender(); return;
         }
         if (action === 'throw' || action === 'hit') {
             const ball = this.state.f.players.find(ent => ent.type === 'ball');
@@ -481,7 +530,7 @@ class App {
         }
         if (action === 'run' && p.type === 'ball') { this.toast('The ball cannot run routes.'); return; }
         this.input.ix.drawingLine = { id: this.state.nextId++, startId: p.id, type: action, start: {x: p.x, y: p.y}, end: {x: p.x, y: p.y} };
-        this.input.attachGlobalMove(); 
+        this.input.attachGlobalMove();
     }
 
     _setPlaybackState(isActive) {
@@ -497,17 +546,17 @@ class App {
             this.scheduleRender(); return;
         }
         if(this.state.frames.length < 2) return;
-        this._setPlaybackState(true); 
+        this._setPlaybackState(true);
         const btn = document.getElementById('btn-play'); btn.innerHTML = '⏹ Stop'; btn.classList.replace('btn-primary', 'btn-danger');
 
         let cIdx = 0, sTime = null;
         const step = (ts) => {
             if(!sTime) sTime = ts; const p = Math.min((ts - sTime) / this.cfg.animSpeed, 1);
             this.renderer.draw(this.state, this.input.ix, p, this.state.frames[cIdx]);
-            if(p < 1) { this.animReq = requestAnimationFrame(step); } 
+            if(p < 1) { this.animReq = requestAnimationFrame(step); }
             else {
                 cIdx++; sTime = null;
-                if(cIdx < this.state.frames.length) { this.animReq = requestAnimationFrame(step); } 
+                if(cIdx < this.state.frames.length) { this.animReq = requestAnimationFrame(step); }
                 else {
                     this._setPlaybackState(false); btn.innerHTML = '▶ Play'; btn.classList.replace('btn-danger', 'btn-primary');
                     this.state.currentIdx = this.state.frames.length - 1; this.syncUI();
@@ -520,7 +569,7 @@ class App {
 
     async exportVideo() {
         if(this.state.frames.length < 2 || this.animating) { this.toast('Need at least 2 frames to export.'); return; }
-        
+
         this._setPlaybackState(true);
         const btn = document.getElementById('btn-export');
         const origText = btn.innerHTML;
@@ -538,25 +587,25 @@ class App {
             btn.innerHTML = origText; btn.classList.remove('btn-danger');
             this.toast('Video Exported!');
         };
-        
+
         recorder.start();
 
         let cIdx = 0, sTime = null;
         const step = (ts) => {
-            if(!sTime) sTime = ts; 
+            if(!sTime) sTime = ts;
             const p = Math.min((ts - sTime) / this.cfg.animSpeed, 1);
             this.renderer.draw(this.state, this.input.ix, p, this.state.frames[cIdx]);
 
-            if(p < 1) { 
-                this.animReq = requestAnimationFrame(step); 
+            if(p < 1) {
+                this.animReq = requestAnimationFrame(step);
             } else {
                 cIdx++; sTime = null;
-                if(cIdx < this.state.frames.length) { 
-                    this.animReq = requestAnimationFrame(step); 
+                if(cIdx < this.state.frames.length) {
+                    this.animReq = requestAnimationFrame(step);
                 } else {
                     this._setPlaybackState(false);
                     recorder.stop();
-                    this.state.currentIdx = this.state.frames.length - 1; 
+                    this.state.currentIdx = this.state.frames.length - 1;
                     this.syncUI();
                     this.renderer.draw(this.state, this.input.ix, 1.0, this.state.frames[this.state.currentIdx]);
                 }
@@ -565,7 +614,6 @@ class App {
         this.animReq = requestAnimationFrame(step);
     }
 
-    // --- NEW: Save and Load Logic ---
     exportPlaybook() {
         const data = JSON.stringify(this.state.frames, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
@@ -589,10 +637,9 @@ class App {
                 if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].players) {
                     this.state.frames = parsedData;
                     this.state.currentIdx = 0;
-                    this.state.history = []; // Reset undo stack
+                    this.state.history = [];
                     this.state.historyIdx = -1;
-                    
-                    // Reset next ID counter to avoid conflicts
+
                     let maxId = 100;
                     this.state.frames.forEach(f => {
                         f.players.forEach(p => maxId = Math.max(maxId, p.id));
@@ -600,6 +647,7 @@ class App {
                     });
                     this.state.nextId = maxId + 1;
 
+                    this.closeRadial(); // Clean up selection
                     this.state.save();
                     this.renderer.clearCache();
                     this.vp.centerOn(400, 500);
@@ -614,7 +662,7 @@ class App {
             }
         };
         reader.readAsText(file);
-        e.target.value = ''; // Reset the input so the same file can be loaded again if needed
+        e.target.value = '';
     }
 
     scheduleRender() {
