@@ -11,13 +11,17 @@ body { display: flex; flex-direction: column; height: 100dvh; background: var(--
 
 header { display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1.5rem; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 10; }
 .brand { font-weight: 800; font-size: 1.2rem; } .brand span { color: var(--accent); }
-.toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.toolbar { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
 .btn { padding: 0.5rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); font-weight: 600; font-size: 0.85rem; cursor: pointer; transition: 0.15s; }
 .btn:hover:not(:disabled) { background: var(--surface-hover); } .btn:active:not(:disabled) { transform: scale(0.96); } .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: white; }
 .btn-danger { background: var(--danger); border-color: var(--danger); color: white; }
 .btn-warning { background: var(--warning); border-color: var(--warning); color: #000; } .btn-warning:hover:not(:disabled) { background: #d97706; }
 .btn-success { background: var(--success); border-color: var(--success); color: white; }
+
+/* Speed Control Slider */
+.speed-control { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0 0.5rem; }
+.speed-control input[type="range"] { width: 60px; height: 4px; accent-color: var(--accent); cursor: pointer; }
 
 .workspace { display: flex; flex: 1; overflow: hidden; position: relative; }
 
@@ -31,6 +35,8 @@ aside.right { border-right: none; border-left: 1px solid var(--border); }
 .frame-item.active { background: rgba(59, 130, 246, 0.15); border: 1px solid var(--accent); color: var(--accent); }
 .frame-name { outline: none; border-bottom: 1px dashed transparent; width: 100%; transition: 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .frame-name:focus { border-bottom-color: var(--text); cursor: text; }
+.frame-name:hover::after { content: ' ✎'; opacity: 0.5; font-size: 0.8em; } /* UX Polish for renaming */
+.frame-name:focus::after { content: ''; }
 
 .palette { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
 .token { width: 42px; height: 42px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.9rem; cursor: pointer; background: var(--surface); border: 2px solid var(--border); margin: 0 auto; transition: 0.1s; }
@@ -82,16 +88,16 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
         overflow-x: auto;
         overflow-y: hidden;
         align-items: center;
-        max-height: 100px;
+        max-height: 100px; /* Prevents token clipping */
         padding: 0.5rem;
-        -webkit-overflow-scrolling: touch; /* Smooth scroll on iOS */
+        -webkit-overflow-scrolling: touch;
     }
     aside.right .panel {
         border: none;
         padding: 0 1rem 0 0;
         display: flex;
         align-items: center;
-        flex-shrink: 0; /* CRITICAL FIX: Stops panels from squishing to 0 width */
+        flex-shrink: 0; /* Keeps panels from squishing */
     }
     aside.right h3 { display: none; }
 
@@ -103,7 +109,16 @@ canvas { display: block; width: 100%; height: 100%; touch-action: none; }
     aside { order: 3; width: 100%; border-right: none; border-top: 1px solid var(--border); display: flex; flex-direction: column; min-height: 120px; max-height: 20vh; }
     aside .panel { padding: 0.5rem; }
     aside .panel:last-child { display: none; }
-    #frame-list { flex-direction: row; overflow-x: auto; gap: 0.5rem; padding-bottom: 0.5rem; }
+
+    /* Frame List Mobile Scrolling */
+    #frame-list {
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 0.5rem;
+        padding-bottom: 0.5rem;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-x; /* Explicitly allow side-to-side scrolling */
+    }
     .frame-item { flex: 0 0 auto; min-width: 110px; padding: 0.4rem; }
     .frame-name { max-width: 90px; }
 }

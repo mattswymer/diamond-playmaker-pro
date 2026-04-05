@@ -12,14 +12,13 @@ class StateStore {
     save() {
         this.history = this.history.slice(0, this.historyIdx + 1);
         this.history.push(structuredClone(this.frames));
-        if (this.history.length > 20) {
-            this.history.shift();
-            // FIX: Do not increment historyIdx if we shifted. It stays at max length.
-        } else {
-            this.historyIdx++;
-        }
-        // Autosave
-        localStorage.setItem('diamond_autosave', JSON.stringify(this.frames));
+        if (this.history.length > 20) this.history.shift();
+
+        // FIX: Unconditional history pointer update prevents UI drift
+        this.historyIdx = this.history.length - 1;
+
+        // Versioned Autosave
+        localStorage.setItem('diamond_autosave_v2', JSON.stringify(this.frames));
     }
 
     undo() {
@@ -53,6 +52,7 @@ class Viewport {
         let resizeTimeout;
         this.resizeObserver = new ResizeObserver(entries => {
             clearTimeout(resizeTimeout);
+            // Debounced resize to prevent render thrashing
             resizeTimeout = setTimeout(() => {
                 for (let entry of entries) {
                     if(entry.contentRect.width > 0 && entry.contentRect.height > 0) {
@@ -61,15 +61,19 @@ class Viewport {
                             this.centerOn(400, 500); this.initialized = true;
                         }
                         if(this.app) {
-                            if (this.app.input && this.app.input.ix.activeEntity) this.app.openRadial(this.app.input.ix.activeEntity);
+                            if (this.app.input?.ix?.activeEntity) this.app.openRadial(this.app.input.ix.activeEntity);
                             this.app.scheduleRender();
                         }
                     }
                 }
-            }, 50); // Debounced resize
+            }, 50);
         });
         this.resizeObserver.observe(this.canvas.parentElement);
     }
+
+    // FIX: Memory leak cleanup method
+    destroy() { this.resizeObserver.disconnect(); }
+
     get scale() { return this._scale; }
     set scale(val) { this._scale = Math.max(0.4, Math.min(val, 4.0)); }
 
@@ -111,10 +115,10 @@ class Renderer {
         this.buildFieldCache();
     }
 
-    // NEW: Offload heavy geometry calculations to run only once
+    // FIX: Move all static base/foul line calculations into the cache
     buildFieldCache() {
         const F = 200 * this.cfg.scale;
-        this.cache = { grass: new Path2D(), mound: new Path2D(), dirtPath: new Path2D(), bases: [] };
+        this.cache = { grass: new Path2D(), mound: new Path2D(), dirtPath: new Path2D(), bases: [], lines: new Path2D() };
 
         this.cache.grass.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
         this.cache.grass.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
@@ -133,6 +137,11 @@ class Renderer {
             const p = new Path2D(); p.arc(b.x, b.y, 8 * this.cfg.scale, 0, Math.PI*2);
             this.cache.bases.push(p);
         });
+
+        this.cache.lines.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        this.cache.lines.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
+        this.cache.lines.moveTo(this.GEO.HOME.x, this.GEO.HOME.y);
+        this.cache.lines.lineTo(this.GEO.HOME.x + F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
     }
 
     clearCache() { this.pathCache.clear(); }
@@ -160,7 +169,7 @@ class Renderer {
     }
 
     drawField() {
-        const c = this.ctx, F = 200 * this.cfg.scale;
+        const c = this.ctx;
         c.save();
         c.clip(this.cache.grass); c.fillStyle = this.COLORS.fair; c.fill(this.cache.grass);
         c.fillStyle = this.COLORS.dirt; c.fill(this.cache.mound);
@@ -168,9 +177,7 @@ class Renderer {
         c.fillStyle = this.COLORS.dirt; this.cache.bases.forEach(b => c.fill(b));
         c.restore();
 
-        c.beginPath(); c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y); c.lineTo(this.GEO.HOME.x - F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
-        c.moveTo(this.GEO.HOME.x, this.GEO.HOME.y); c.lineTo(this.GEO.HOME.x + F*Math.sin(Math.PI/4), this.GEO.HOME.y - F*Math.cos(Math.PI/4));
-        c.strokeStyle = '#cbd5e1'; c.lineWidth = 2; c.stroke();
+        c.strokeStyle = '#cbd5e1'; c.lineWidth = 2; c.stroke(this.cache.lines);
 
         c.fillStyle = '#fff'; c.strokeStyle = '#000'; c.lineWidth = 1.5;
         [this.GEO.B1, this.GEO.B2, this.GEO.B3].forEach(b => { c.beginPath(); const size = 6; c.moveTo(b.x, b.y - size); c.lineTo(b.x + size, b.y); c.lineTo(b.x, b.y + size); c.lineTo(b.x - size, b.y); c.closePath(); c.fill(); c.stroke(); });
@@ -242,8 +249,8 @@ class InputHandler {
 
         this.canvas.addEventListener('pointerdown', this._boundDown);
 
-        // KEYBOARD SHORTCUTS
-        window.addEventListener('keydown', e => {
+        // FIX: Bound listeners for clean detachment
+        this._boundKeyDown = e => {
             this.keys[e.code] = true;
             if(e.code === 'Escape') {
                 if(this.ix.drawingLine) { this.ix.drawingLine = null; this.detachGlobalMove(); this.app.scheduleRender(); }
@@ -256,14 +263,25 @@ class InputHandler {
             if(e.code === 'Delete' || e.code === 'Backspace') {
                 if (this.ix.activeEntity) { e.preventDefault(); this.app.executeAction('delete'); }
             }
-        });
-        window.addEventListener('keyup', e => this.keys[e.code] = false);
+        };
+        this._boundKeyUp = e => this.keys[e.code] = false;
+
+        window.addEventListener('keydown', this._boundKeyDown);
+        window.addEventListener('keyup', this._boundKeyUp);
 
         this.canvas.addEventListener('wheel', e => {
             e.preventDefault();
             const zoomFactor = Math.max(0.95, Math.min(1.05, Math.exp(-e.deltaY * 0.002)));
             this.zoomAt(e.clientX, e.clientY, zoomFactor);
         }, { passive: false });
+    }
+
+    // FIX: Memory leak teardown
+    destroy() {
+        window.removeEventListener('keydown', this._boundKeyDown);
+        window.removeEventListener('keyup', this._boundKeyUp);
+        this.canvas.removeEventListener('pointerdown', this._boundDown);
+        this.detachGlobalMove();
     }
 
     zoomAt(screenX, screenY, zoomDelta) {
@@ -284,7 +302,8 @@ class InputHandler {
 
     onPointerDown(e) {
         this.pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        this.attachGlobalMove(); document.addEventListener('pointerup', this._boundUp);
+        this.attachGlobalMove();
+        document.addEventListener('pointerup', this._boundUp, { once: true }); // FIX: Stacking leak patched
 
         if (this.pointers.size === 2) {
             const pts = Array.from(this.pointers.values());
@@ -330,7 +349,8 @@ class InputHandler {
         this.renderer.vp.apply(); this.renderer.ctx.lineWidth = 20 / this.vp.scale;
         for (let i = this.state.f.lines.length - 1; i >= 0; i--) {
             const l = this.state.f.lines[i]; const p2d = this.renderer.generateLinePath(l);
-            if (this.renderer.ctx.isPointInStroke(p2d, screenX * this.vp.dpr, screenY * this.vp.dpr)) {
+            // FIX: DPR bug resolved. Do not multiply by DPR when testing screen coordinates!
+            if (this.renderer.ctx.isPointInStroke(p2d, screenX, screenY)) {
                 this.app.closeRadial();
                 this.state.f.lines.splice(i, 1);
                 this.renderer.clearCache();
@@ -380,7 +400,6 @@ class InputHandler {
 
         if (this.ix.draggingPlayer) {
             this.ix.draggingPlayer.x = worldPos.x; this.ix.draggingPlayer.y = worldPos.y;
-            // Hide radial menu while dragging
             if (this.ix.activeEntity) this.app.closeRadial();
             this.app.scheduleRender();
         }
@@ -393,7 +412,6 @@ class InputHandler {
         if (this.pointers.size === 0) {
             this.ix.panStart = null;
             this.canvas.parentElement.classList.remove('panning');
-            document.removeEventListener('pointerup', this._boundUp);
             this.detachGlobalMove();
         }
 
@@ -416,14 +434,13 @@ class InputHandler {
 class App {
     constructor() {
         this.canvas = document.getElementById('field');
-        this.cfg = { scale: 2.8, radius: 14, animSpeed: 1500 };
+        this.cfg = { scale: 2.8, radius: 14 }; // Speed removed from config, handled dynamically via UI
         this.state = new StateStore(); this.vp = new Viewport(this.canvas, this);
         this.renderer = new Renderer(this.canvas.getContext('2d'), this.vp, this.cfg);
         this.input = new InputHandler(this.canvas, this.vp, this.state, this.renderer, this);
         this.pendingRedraw = false; this.animating = false; this.animReq = null;
 
-        // LOAD AUTOSAVE
-        const autosave = localStorage.getItem('diamond_autosave');
+        const autosave = localStorage.getItem('diamond_autosave_v2');
         if (autosave) {
             try { this.state.frames = JSON.parse(autosave); this.state.save(); }
             catch(e) { this.prePopulate(); this.state.save(); }
@@ -435,16 +452,20 @@ class App {
     }
 
     prePopulate() {
-        const cx = 400, cy = 720, s = 2.8;
         const add = (lbl, typ, x, y) => this.state.f.players.push({id: this.state.nextId++, label: lbl, type: typ, x, y});
-        const b1 = {x: cx + (60*s*Math.cos(Math.PI/4)), y: cy - (60*s*Math.sin(Math.PI/4))};
-        const b2 = {x: cx, y: cy - (60*s*Math.sqrt(2))};
-        const b3 = {x: cx - (60*s*Math.cos(Math.PI/4)), y: cy - (60*s*Math.sin(Math.PI/4))};
-
-        add('1', 'def', cx, cy - (46*s)); add('2', 'def', cx, cy + 35); add('3', 'def', b1.x + 10, b1.y - 45);
-        add('4', 'def', b2.x + 40, b2.y + 15); add('5', 'def', b3.x - 10, b3.y - 45); add('6', 'def', b2.x - 40, b2.y + 15);
-        add('7', 'def', b3.x - 40, b3.y - 140); add('8', 'def', b2.x, b2.y - 170); add('9', 'def', b1.x + 40, b1.y - 140);
-        add('B1', 'off', cx - 22, cy); add('⚾', 'ball', cx, cy - (46*s));
+        // Use GEO mapping directly from renderer to stay DRY
+        const g = this.renderer.GEO;
+        add('1', 'def', g.MOUND.x, g.MOUND.y);
+        add('2', 'def', g.HOME.x, g.HOME.y + 35);
+        add('3', 'def', g.B1.x + 10, g.B1.y - 45);
+        add('4', 'def', g.B2.x + 40, g.B2.y + 15);
+        add('5', 'def', g.B3.x - 10, g.B3.y - 45);
+        add('6', 'def', g.B2.x - 40, g.B2.y + 15);
+        add('7', 'def', g.B3.x - 40, g.B3.y - 140);
+        add('8', 'def', g.B2.x, g.B2.y - 170);
+        add('9', 'def', g.B1.x + 40, g.B1.y - 140);
+        add('B1', 'off', g.HOME.x - 22, g.HOME.y);
+        add('⚾', 'ball', g.MOUND.x, g.MOUND.y);
     }
 
     initUI() {
@@ -456,7 +477,7 @@ class App {
             t.addEventListener('pointerdown', e => {
                 e.preventDefault();
                 this.closeRadial();
-                if (navigator.vibrate) navigator.vibrate(15); // Haptic feedback
+                if (navigator.vibrate) navigator.vibrate(15);
                 const centerScreenX = this.canvas.width / 2 / this.vp.dpr;
                 const centerScreenY = this.canvas.height / 2 / this.vp.dpr;
                 const wPos = this.vp.screenToWorld(centerScreenX, centerScreenY);
@@ -512,9 +533,7 @@ class App {
         this.closeRadial();
         const nF = structuredClone(this.state.f); nF.id = Date.now(); nF.name = `Frame ${this.state.frames.length + 1}`;
 
-        if (duplicate) {
-            // Keep lines intact
-        } else {
+        if (!duplicate) {
             nF.lines = [];
             nF.players.forEach(p => { const l = this.state.f.lines.find(li => li.startId === p.id); if(l) { p.x = l.end.x; p.y = l.end.y; }});
         }
@@ -552,14 +571,28 @@ class App {
     }
 
     openRadial(player) {
-        this.input.ix.activeEntity = player; const domPos = this.vp.worldToScreen(player.x, player.y);
+        this.input.ix.activeEntity = player;
+        const domPos = this.vp.worldToScreen(player.x, player.y);
         const menu = document.getElementById('radial-menu');
-        menu.style.left = `${domPos.x - 70}px`; menu.style.top = `${domPos.y - 70}px`;
+
+        // FIX: Screen bounds clamping for mobile so it never renders off-screen
+        const menuSize = 140;
+        const padding = 10;
+        let left = domPos.x - (menuSize/2);
+        let top = domPos.y - (menuSize/2);
+
+        left = Math.max(padding, Math.min(left, window.innerWidth - menuSize - padding));
+        top = Math.max(padding, Math.min(top, window.innerHeight - menuSize - padding));
+
+        menu.style.left = `${left}px`; menu.style.top = `${top}px`;
         menu.classList.add('active');
+        menu.setAttribute('aria-hidden', 'false');
     }
 
     closeRadial() {
-        document.getElementById('radial-menu').classList.remove('active');
+        const menu = document.getElementById('radial-menu');
+        menu.classList.remove('active');
+        menu.setAttribute('aria-hidden', 'true');
         this.input.ix.activeEntity = null;
     }
 
@@ -601,9 +634,11 @@ class App {
         this._setPlaybackState(true);
         const btn = document.getElementById('btn-play'); btn.innerHTML = '⏹ Stop'; btn.classList.replace('btn-primary', 'btn-danger');
 
+        const speed = parseInt(document.getElementById('slider-speed').value, 10);
         let cIdx = 0, sTime = null;
+
         const step = (ts) => {
-            if(!sTime) sTime = ts; const p = Math.min((ts - sTime) / this.cfg.animSpeed, 1);
+            if(!sTime) sTime = ts; const p = Math.min((ts - sTime) / speed, 1);
             this.renderer.draw(this.state, this.input.ix, p, this.state.frames[cIdx]);
             if(p < 1) { this.animReq = requestAnimationFrame(step); }
             else {
@@ -626,27 +661,38 @@ class App {
         const btn = document.getElementById('btn-export');
         const origText = btn.innerHTML;
         btn.innerHTML = '⏺ Rec...'; btn.classList.add('btn-danger');
-        btn.disabled = true; // Disable to prevent double-click crashes
+        btn.disabled = true;
 
-        const stream = this.canvas.captureStream(30);
-        const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
-        const chunks = [];
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = () => {
-            const blob = new Blob(chunks, { type: 'video/webm' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a'); a.href = url; a.download = 'playmaker-export.webm';
-            a.click(); URL.revokeObjectURL(url);
+        const speed = parseInt(document.getElementById('slider-speed').value, 10);
+        let recorder;
+
+        // FIX: Try/Catch for MediaRecorder crash looping
+        try {
+            const stream = this.canvas.captureStream(30);
+            recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const chunks = [];
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url;
+                a.download = `playbook-${new Date().toLocaleDateString('en-CA')}.webm`; // Safe filename string
+                a.click(); URL.revokeObjectURL(url);
+                btn.innerHTML = origText; btn.classList.remove('btn-danger'); btn.disabled = false;
+                this.toast('Video Exported!');
+            };
+            recorder.start();
+        } catch (err) {
+            this._setPlaybackState(false);
             btn.innerHTML = origText; btn.classList.remove('btn-danger'); btn.disabled = false;
-            this.toast('Video Exported!');
-        };
-
-        recorder.start();
+            this.toast('Video export not supported in this browser.');
+            return;
+        }
 
         let cIdx = 0, sTime = null;
         const step = (ts) => {
             if(!sTime) sTime = ts;
-            const p = Math.min((ts - sTime) / this.cfg.animSpeed, 1);
+            const p = Math.min((ts - sTime) / speed, 1);
             this.renderer.draw(this.state, this.input.ix, p, this.state.frames[cIdx]);
 
             if(p < 1) {
@@ -671,7 +717,8 @@ class App {
         const data = JSON.stringify(this.state.frames, null, 2);
         const blob = new Blob([data], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `playbook-${new Date().toISOString().split('T')[0]}.json`;
+        const a = document.createElement('a'); a.href = url;
+        a.download = `playbook-${new Date().toLocaleDateString('en-CA')}.json`;
         a.click(); URL.revokeObjectURL(url); this.toast('Playbook Saved!');
     }
 
@@ -683,8 +730,8 @@ class App {
         reader.onload = (event) => {
             try {
                 const parsedData = JSON.parse(event.target.result);
-                // Strict validation schema check
-                if (Array.isArray(parsedData) && parsedData.length > 0 && parsedData[0].players && parsedData[0].lines) {
+                // Deeper validation check
+                if (Array.isArray(parsedData) && parsedData.length > 0 && Array.isArray(parsedData[0].players) && Array.isArray(parsedData[0].lines)) {
                     this.state.frames = parsedData;
                     this.state.currentIdx = 0;
                     this.state.history = [];
@@ -716,6 +763,7 @@ class App {
     }
 
     scheduleRender() {
+        if(this.animating) return; // FIX: Prevent double-RAF thrashing mid-animation
         if(!this.pendingRedraw) { this.pendingRedraw = true; requestAnimationFrame(() => { this.renderer.draw(this.state, this.input.ix); this.pendingRedraw = false; }); }
     }
 }

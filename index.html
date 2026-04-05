@@ -3,24 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Diamond Playmaker Pro | Architect V8.0</title>
+    <title>Diamond Playmaker Pro | Architect V9.0</title>
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
     <header>
         <div class="brand">Diamond<span>Architect</span></div>
-        <div class="toolbar">
-            <button class="btn" id="btn-undo" title="Ctrl+Z" disabled>↶ Undo</button>
-            <button class="btn" id="btn-redo" title="Ctrl+Y" disabled>↷ Redo</button>
-            <button class="btn btn-warning" id="btn-reset">🔄 Reset</button>
+        <div class="toolbar" role="toolbar" aria-label="Main controls">
+            <button class="btn" id="btn-undo" title="Ctrl+Z" aria-label="Undo" disabled>↶ Undo</button>
+            <button class="btn" id="btn-redo" title="Ctrl+Y" aria-label="Redo" disabled>↷ Redo</button>
+            <button class="btn btn-warning" id="btn-reset" aria-label="Reset playbook">🔄 Reset</button>
             <div style="width: 1px; background: var(--border); margin: 0 0.2rem;"></div>
-            <button class="btn" id="btn-save">💾 Save</button>
-            <button class="btn" id="btn-load">📂 Load</button>
-            <input type="file" id="file-load" accept=".json" style="display: none;">
+            <button class="btn" id="btn-save" aria-label="Save playbook">💾 Save</button>
+            <button class="btn" id="btn-load" aria-label="Load playbook">📂 Load</button>
+            <input type="file" id="file-load" accept=".json" style="display: none;" aria-hidden="true">
             <div style="width: 1px; background: var(--border); margin: 0 0.2rem;"></div>
-            <button class="btn btn-primary" id="btn-play">▶ Play</button>
-            <button class="btn btn-success" id="btn-export">🎬 Export</button>
+
+            <div class="speed-control" title="Playback Speed">
+                <span style="font-size: 0.7rem; color: var(--text-muted);">Speed</span>
+                <input type="range" id="slider-speed" min="500" max="3000" step="250" value="1500" dir="rtl" aria-label="Animation speed">
+            </div>
+
+            <button class="btn btn-primary" id="btn-play" aria-label="Play animation">▶ Play</button>
+            <button class="btn btn-success" id="btn-export" aria-label="Export to video">🎬 Export</button>
         </div>
     </header>
 
@@ -28,11 +34,11 @@
         <aside>
             <div class="panel">
                 <h3>Frames</h3>
-                <div id="frame-list"></div>
+                <div id="frame-list" role="list"></div>
                 <div style="display: flex; gap: 0.5rem;">
-                    <button class="btn" id="btn-add-frame" style="flex:1;" title="New Frame">+ Add</button>
-                    <button class="btn" id="btn-dup-frame" style="flex:1;" title="Duplicate Frame">⧉ Dup</button>
-                    <button class="btn" id="btn-del-frame" style="flex:1; color: var(--danger);" title="Delete Frame">− Del</button>
+                    <button class="btn" id="btn-add-frame" style="flex:1;" title="New Frame" aria-label="Add frame">+ Add</button>
+                    <button class="btn" id="btn-dup-frame" style="flex:1;" title="Duplicate Frame" aria-label="Duplicate frame">⧉ Dup</button>
+                    <button class="btn" id="btn-del-frame" style="flex:1; color: var(--danger);" title="Delete Frame" aria-label="Delete frame">− Del</button>
                 </div>
             </div>
             <div class="panel" style="border-bottom: none; flex: 1;">
@@ -48,25 +54,27 @@
         </aside>
 
         <main id="canvas-container">
-            <canvas id="field"></canvas>
-            <div id="radial-menu">
-                <div class="radial-btn" data-action="run" data-label="Run Route">🏃</div>
-                <div class="radial-btn" data-action="throw" data-label="Throw Ball">⚾</div>
-                <div class="radial-btn" data-action="hit" data-label="Hit Arc">☄️</div>
-                <div class="radial-btn" data-action="delete" data-label="Delete">🗑️</div>
+            <canvas id="field" aria-label="Interactive baseball field playbook"></canvas>
+
+            <div id="radial-menu" role="menu" aria-hidden="true">
+                <div class="radial-btn" data-action="run" data-label="Run Route" role="menuitem">🏃</div>
+                <div class="radial-btn" data-action="throw" data-label="Throw Ball" role="menuitem">⚾</div>
+                <div class="radial-btn" data-action="hit" data-label="Hit Arc" role="menuitem">☄️</div>
+                <div class="radial-btn" data-action="delete" data-label="Delete" role="menuitem">🗑️</div>
             </div>
-            <div class="viewport-controls">
-                <button class="btn" id="btn-zoom-out">−</button>
-                <button class="btn" id="btn-zoom-reset">Reset</button>
-                <button class="btn" id="btn-zoom-in">+</button>
+
+            <div class="viewport-controls" aria-label="Zoom controls">
+                <button class="btn" id="btn-zoom-out" aria-label="Zoom out">−</button>
+                <button class="btn" id="btn-zoom-reset" aria-label="Reset zoom">Reset</button>
+                <button class="btn" id="btn-zoom-in" aria-label="Zoom in">+</button>
             </div>
-            <div id="toast" class="toast"></div>
+            <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
         </main>
 
         <aside class="right">
             <div class="panel">
                 <div class="palette" style="grid-template-columns: 1fr;">
-                    <div class="token ball" data-type="ball">⚾ BALL</div>
+                    <div class="token ball" data-type="ball" role="button" aria-label="Add baseball">⚾ BALL</div>
                 </div>
             </div>
             <div class="panel">
